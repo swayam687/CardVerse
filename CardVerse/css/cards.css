@@ -1,0 +1,277 @@
+/* ============================================================
+   RuleVerse — cards.css (Pulse)
+   Card face: big number, character name, ability pill.
+   ============================================================ */
+
+.card {
+  position: relative;
+  flex: 0 0 auto;
+  width: 76px;
+  height: 108px;
+  border-radius: 12px;
+  transform-style: preserve-3d;
+  transition: transform .22s cubic-bezier(.2,.9,.3,1.3);
+  user-select: none;
+  -webkit-user-select: none;
+}
+@media (min-width: 560px) {
+  .card { width: 88px; height: 124px; }
+}
+
+.card-inner {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  border-radius: 12px;
+}
+
+.card-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.14);
+}
+html[data-theme="light"] .card-face {
+  box-shadow: 0 3px 10px -3px rgba(0,0,0,.15), inset 0 0 0 1px rgba(0,0,0,.06);
+}
+
+.card-front {
+  background: var(--c-fill, #444);
+  color: var(--c-text, #fff);
+  padding: 8px 9px;
+  justify-content: space-between;
+  align-items: stretch;
+}
+@media (min-width: 560px) { .card-front { padding: 10px 11px; } }
+
+.card-front::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  background: radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%);
+  z-index: 1;
+}
+.card-front > * { position: relative; z-index: 2; }
+
+.card-back {
+  transform: rotateY(180deg);
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255,77,109,.35), transparent 55%),
+    radial-gradient(circle at 80% 90%, rgba(155,93,229,.35), transparent 55%),
+    repeating-linear-gradient(45deg, #1F1F2E 0 8px, #262638 8px 16px);
+  border: 1.5px solid rgba(255,77,109,.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card-back::after {
+  content: 'RV';
+  font-family: var(--font, 'Nunito Sans', sans-serif);
+  font-weight: 900;
+  font-size: 22px;
+  letter-spacing: -1px;
+  color: #fff;
+  opacity: .85;
+  transform: rotate(-12deg);
+}
+
+/* ---- color fills (inlined so they never depend on main.css vars) ---- */
+.card[data-color="red"]    { --c-fill: #E63946; --c-text: #ffffff; }
+.card[data-color="blue"]   { --c-fill: #3A7BD5; --c-text: #ffffff; }
+.card[data-color="green"]  { --c-fill: #2A9D8F; --c-text: #ffffff; }
+.card[data-color="yellow"] { --c-fill: #E9C46A; --c-text: #2A1F0A; }
+.card[data-color="wild"]   { --c-fill: #9B5DE5; --c-text: #ffffff; }
+
+/* Wild cards get a rainbow border, purple inner fill */
+.card[data-color="wild"] .card-front {
+  background: conic-gradient(from 210deg,
+    #E63946 0deg,
+    #E9C46A 90deg,
+    #2A9D8F 180deg,
+    #3A7BD5 270deg,
+    #E63946 360deg);
+}
+.card[data-color="wild"] .card-front::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 9px;
+  background: #9B5DE5;
+  z-index: 1;
+}
+.card[data-color="wild"] .card-front > * { position: relative; z-index: 2; }
+
+/* ---- corner shapes (only shown in colorblind mode) ---- */
+.c-shape {
+  position: absolute;
+  font-family: var(--font, 'Nunito Sans', sans-serif);
+  font-weight: 900;
+  font-size: 12px;
+  line-height: 1;
+  z-index: 3;
+  opacity: .95;
+}
+@media (min-width: 560px) { .c-shape { font-size: 14px; } }
+.c-shape.tl { top: 8px; left: 9px; }
+.c-shape.br { bottom: 8px; right: 9px; transform: rotate(180deg); }
+
+/* ---- center display: number or effect icon ---- */
+.c-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--font, 'Nunito Sans', sans-serif);
+  font-weight: 900;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -1.5px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 4px rgba(0,0,0,.35);
+  min-height: 0;
+}
+@media (min-width: 560px) { .c-center { font-size: 40px; } }
+.card[data-color="yellow"] .c-center { text-shadow: 0 1px 2px rgba(255,255,255,.3); }
+
+.c-center.is-icon { font-size: 26px; letter-spacing: 0; }
+@media (min-width: 560px) { .c-center.is-icon { font-size: 30px; } }
+
+/* ---- bottom: character name + ability pill ---- */
+.c-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  min-height: 0;
+}
+
+.c-name {
+  font-family: var(--font, 'Nunito Sans', sans-serif);
+  font-size: 10.5px;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  opacity: .95;
+}
+@media (min-width: 560px) { .c-name { font-size: 11.5px; } }
+
+.c-pill {
+  background: rgba(0,0,0,.35);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  text-align: center;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  text-transform: uppercase;
+}
+@media (min-width: 560px) { .c-pill { font-size: 9.5px; } }
+.card[data-color="yellow"] .c-pill { background: rgba(0,0,0,.12); color: #2A1F0A; }
+.c-pill.locked { background: rgba(230,57,70,.85); color: #ffffff; }
+
+/* ---- small variant (reveal modal) ---- */
+.card.small { width: 48px; height: 68px; border-radius: 8px; }
+.card.small .card-front { padding: 4px 5px; }
+.card.small .c-center { font-size: 22px; }
+.card.small .c-name { font-size: 7.5px; }
+.card.small .c-pill { display: none; }
+.card.small .c-shape { font-size: 9px; }
+.card.small .c-shape.tl { top: 4px; left: 5px; }
+.card.small .c-shape.br { bottom: 4px; right: 5px; }
+
+/* ---- tiny variant (opponent stacks) ---- */
+.card.tiny { width: 30px; height: 42px; border-radius: 6px; }
+.card.tiny .card-front { padding: 0; }
+.card.tiny .c-center { font-size: 14px; }
+.card.tiny .c-name,
+.card.tiny .c-pill,
+.card.tiny .c-shape { display: none; }
+
+/* ---- hover / playable states (used by ArenaView) ---- */
+.hand .card.playable { cursor: pointer; }
+.hand .card.playable:hover {
+  transform: translateY(-24px) rotateX(10deg) scale(1.06);
+  z-index: 30;
+}
+.hand .card.playable::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 15px;
+  box-shadow: 0 0 0 2px #FF4D6D, 0 0 20px -2px #FF4D6D;
+  pointer-events: none;
+  animation: canPulse 1.5s ease-in-out infinite;
+}
+@keyframes canPulse {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+.hand .card.dim {
+  filter: brightness(.5) saturate(.5);
+  cursor: not-allowed;
+}
+.hand .card.dealing {
+  animation: dealIn .42s cubic-bezier(.2,.9,.3,1.15) backwards;
+}
+@keyframes dealIn {
+  from { opacity: 0; transform: translate(0,-180px) rotate(-32deg) scale(.5); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---- colorblind patterns ---- */
+html.cb-mode .card[data-color="red"] .card-front::after {
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%),
+    repeating-linear-gradient(45deg, transparent 0 6px, rgba(0,0,0,.14) 6px 8px);
+}
+html.cb-mode .card[data-color="blue"] .card-front::after {
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%),
+    repeating-linear-gradient(-45deg, transparent 0 6px, rgba(255,255,255,.18) 6px 8px);
+}
+html.cb-mode .card[data-color="green"] .card-front::after {
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%),
+    radial-gradient(circle, rgba(0,0,0,.18) 1.2px, transparent 1.4px);
+  background-size: auto, 10px 10px;
+}
+html.cb-mode .card[data-color="yellow"] .card-front::after {
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 4px, rgba(0,0,0,.1) 4px 5px);
+}
+
+/* ---- tooltip ---- */
+.card-tooltip {
+  position: fixed;
+  transform: translateY(-100%);
+  background: #1A1A24;
+  border: 1px solid #FF4D6D;
+  color: #F5F5FA;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 14px;
+  border-radius: 12px;
+  z-index: 10000;
+  box-shadow: 0 20px 50px -12px rgba(0,0,0,.8);
+  pointer-events: none;
+  font-weight: 700;
+  max-width: 260px;
+}

@@ -1,0 +1,14 @@
+/* ============================================================
+   RuleVerse — studio.css (Pulse)
+   ============================================================ */
+textarea {
+  min-height: 260px;
+  background: #0F0F18;
+  color: #E9C46A;
+  border-color: #2A2A3C;
+}
+html[data-theme="light"] textarea {
+  background: #F0F0F5;
+  color: #6B4F0C;
+  border-color: #E0E0E8;
+}
