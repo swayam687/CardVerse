@@ -1,6 +1,6 @@
 /* ============================================================
-   ui/ArenaView.js — v2.12
-   Adds data-player-idx on opponent cards (for taunt bubbles).
+   ui/ArenaView.js — v2.13
+   Adds: custom avatar rendering (image or emoji) + SoundPacks hooks.
    ============================================================ */
 const ArenaView = {
   state: null,
@@ -18,7 +18,6 @@ const ArenaView = {
 
   mount(state, localIdx = 0) {
     this.stopTimer();
-
     this.state = state;
     this.awaitingInput = false;
     this._timerPaused = false;
@@ -30,10 +29,7 @@ const ArenaView = {
     this._initialDeal = true;
     this._lastRevealTs = 0;
 
-    if (GameEngine._botTimer) {
-      clearTimeout(GameEngine._botTimer);
-      GameEngine._botTimer = null;
-    }
+    if (GameEngine._botTimer) { clearTimeout(GameEngine._botTimer); GameEngine._botTimer = null; }
 
     if (typeof PrivacyScreen !== 'undefined') {
       PrivacyScreen.hide();
@@ -41,7 +37,7 @@ const ArenaView = {
     }
     this._hideTooltip();
 
-    ['hand', 'opponents', 'log', 'discardPile'].forEach(id => {
+    ['hand','opponents','log','discardPile'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = '';
     });
@@ -57,6 +53,8 @@ const ArenaView = {
       emoteBtn.onclick = () => {
         this._emoteOpen = !this._emoteOpen;
         if (tray) tray.classList.toggle('on', this._emoteOpen);
+        // close taunt tray so they don't overlap
+        if (typeof Taunts !== 'undefined') Taunts.close();
         Haptics.tap();
       };
     }
@@ -65,10 +63,43 @@ const ArenaView = {
     this._mountDeckPile();
     this._mountRevealOverlay();
 
+    // Apply room's sound pack
+    if (typeof SoundPacks !== 'undefined') {
+      const pack = (Net && Net.room && Net.room.soundPack) || 'default';
+      SoundPacks.set(pack);
+    }
+
     this.render();
     this.renderLog();
     this.startTimer();
     setTimeout(() => Tutorial.start(), 900);
+  },
+
+  /* ── Avatar helpers ──────────────────────────────────── */
+
+  _localAvatarImage() {
+    const p = (typeof LobbyView !== 'undefined' && LobbyView.profile) || {};
+    return p.avatarImage || null;
+  },
+
+  _avatarImageFor(player) {
+    if (!player) return null;
+    // Online: look up in room state (not in game state — keeps state small)
+    if (Net.active && Net.room && player.id) {
+      const rp = Net.room.players && Net.room.players.find(x => x.id === player.id);
+      if (rp && rp.avatarImage) return rp.avatarImage;
+    }
+    // Local player (solo/hotseat): use stored profile image
+    if (!Net.active && this.state && player === this.state.players[this._localIdx]) {
+      return this._localAvatarImage();
+    }
+    return null;
+  },
+
+  _avatarHTML(player, emojiFallback) {
+    const img = this._avatarImageFor(player);
+    if (img) return `<img src="${img}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+    return esc(emojiFallback || (player && player.avatar) || '🙂');
   },
 
   _mountRevealOverlay() {
@@ -83,17 +114,10 @@ const ArenaView = {
   _mountCardSheet() {
     const sheet = document.getElementById('cardSheet');
     if (!sheet) return;
-
     const bg = document.getElementById('cardSheetBg');
     const closeBtn = document.getElementById('cardSheetClose');
-    if (bg && !bg.dataset.wired) {
-      bg.dataset.wired = '1';
-      bg.onclick = () => this._closeCardSheet();
-    }
-    if (closeBtn && !closeBtn.dataset.wired) {
-      closeBtn.dataset.wired = '1';
-      closeBtn.onclick = () => this._closeCardSheet();
-    }
+    if (bg && !bg.dataset.wired) { bg.dataset.wired = '1'; bg.onclick = () => this._closeCardSheet(); }
+    if (closeBtn && !closeBtn.dataset.wired) { closeBtn.dataset.wired = '1'; closeBtn.onclick = () => this._closeCardSheet(); }
 
     const handEl = document.getElementById('hand');
     if (!handEl || handEl.dataset.sheetWired) return;
@@ -112,20 +136,12 @@ const ArenaView = {
         if (uid) this._openCardSheet(String(uid));
       }, 350);
     });
-
-    const cancelPress = () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-    };
+    const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
     handEl.addEventListener('pointerup', cancelPress);
     handEl.addEventListener('pointercancel', cancelPress);
     handEl.addEventListener('pointermove', cancelPress);
-
     handEl.addEventListener('click', (e) => {
-      if (suppressClick) {
-        e.stopPropagation();
-        e.preventDefault();
-        suppressClick = false;
-      }
+      if (suppressClick) { e.stopPropagation(); e.preventDefault(); suppressClick = false; }
     }, true);
   },
 
@@ -134,7 +150,6 @@ const ArenaView = {
     if (!sheet) return;
     const s = this.state;
     if (!s || s.winner !== null) return;
-
     const me = s.players[this._localIdx];
     if (!me) return;
     const card = me.hand.find(c => c.uid === uid);
@@ -152,7 +167,6 @@ const ArenaView = {
           `<li><b>${esc(e.type)}</b>${e.amount ? ' ×' + e.amount : ''}${e.target ? ' → ' + esc(e.target) : ''}</li>`
         ).join('')}</ul>`
       : '<p style="opacity:.7;margin:0">No special ability.</p>';
-
     const reqHtml = card.requires
       ? `<div class="cs-warn">Requires: ${esc(JSON.stringify(card.requires))}</div>` : '';
 
@@ -164,20 +178,15 @@ const ArenaView = {
         <span class="cs-chip">${esc(card.rarity || 'custom')}</span>
       </div>
       ${card.text ? `<p style="margin:0 0 10px">${esc(card.text)}</p>` : ''}
-      ${effectsHtml}
-      ${reqHtml}
+      ${effectsHtml}${reqHtml}
       ${!playable && s.turn === this._localIdx
         ? '<div class="cs-warn">Not playable right now.</div>' : ''}
     `;
 
     if (playBtn) {
       playBtn.disabled = !playable || s.turn !== this._localIdx;
-      playBtn.onclick = () => {
-        this._closeCardSheet();
-        this.onCardClick(card, null);
-      };
+      playBtn.onclick = () => { this._closeCardSheet(); this.onCardClick(card, null); };
     }
-
     sheet.classList.add('open');
     sheet.setAttribute('aria-hidden', 'false');
   },
@@ -228,14 +237,10 @@ const ArenaView = {
   afterAction() {
     const s = this.state;
     if (!s) return;
-
     if (Net.active && Net.isHost) Net.hostBroadcast(s);
 
     if (s.winner !== null) {
-      if (GameEngine._botTimer) {
-        clearTimeout(GameEngine._botTimer);
-        GameEngine._botTimer = null;
-      }
+      if (GameEngine._botTimer) { clearTimeout(GameEngine._botTimer); GameEngine._botTimer = null; }
       this.render();
       setTimeout(() => GameFlow.showWinner(s.winner), 750);
       return;
@@ -267,8 +272,7 @@ const ArenaView = {
         GameEngine._botTimer = null;
         if (GameEngine.state !== myState) return;
         if (myState.winner !== null) return;
-        try { BotAI.takeTurn(myState); }
-        catch (e) { console.error('[bot] afterAction schedule error', e); }
+        try { BotAI.takeTurn(myState); } catch (e) { console.error('[bot] afterAction schedule error', e); }
       }, 700);
     }
   },
@@ -293,9 +297,13 @@ const ArenaView = {
       el.className = 'opp' + (isTurn ? ' active' : '') + (p.hand.length === 0 ? ' out' : '');
       el.dataset.playerIdx = String(i);
 
+      const avatarInner = this._avatarImageFor(p)
+        ? `<img src="${this._avatarImageFor(p)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+        : p.avatar;
+
       el.innerHTML = `
         <div class="opp-top">
-          <span class="opp-av">${p.avatar}</span>
+          <span class="opp-av">${avatarInner}</span>
           <span class="opp-nm">${esc(p.name)}</span>
         </div>
         <div class="opp-cnt">${p.hand.length}<small>CARDS</small></div>
@@ -319,7 +327,6 @@ const ArenaView = {
         dot.className = 'think-dot';
         el.appendChild(dot);
       }
-
       opp.appendChild(el);
     });
 
@@ -347,13 +354,15 @@ const ArenaView = {
     document.getElementById('dirPill').textContent = s.direction === 1 ? '↻ CW' : '↺ CCW';
 
     const me = s.players[humanIdx];
-
+    const myAvatarImg = this._avatarImageFor(me);
     const myBadgeEmoji = (typeof Achievements !== 'undefined' && Achievements.getBadgeEmoji)
       ? Achievements.getBadgeEmoji() : null;
     const myCountEl = document.getElementById('myCount');
-    myCountEl.innerHTML = myBadgeEmoji
-      ? `<span class="my-badge-chip">${myBadgeEmoji}</span> 🂠 ${me.hand.length}`
-      : `🂠 ${me.hand.length}`;
+
+    const avChip = myAvatarImg
+      ? `<span class="my-badge-chip"><img src="${myAvatarImg}" alt="" style="width:18px;height:18px;border-radius:50%;object-fit:cover;vertical-align:-3px"></span>`
+      : (myBadgeEmoji ? `<span class="my-badge-chip">${myBadgeEmoji}</span>` : '');
+    myCountEl.innerHTML = `${avChip} 🂠 ${me.hand.length}`;
 
     const modeChip = document.getElementById('modeChip');
     if (modeChip) modeChip.textContent = s.rulesLabel || 'Custom';
@@ -408,7 +417,6 @@ const ArenaView = {
     const btnDraw = document.getElementById('btnDraw');
     const btnPass = document.getElementById('btnPass');
     const canAct = isMyTurn && !this.awaitingInput;
-
     if (s.pendingDraw > 0) btnDraw.textContent = `TAKE +${s.pendingDraw}`;
     else btnDraw.textContent = 'DRAW';
     btnDraw.disabled = !canAct;
@@ -462,7 +470,6 @@ const ArenaView = {
 
     if (Net.active && Net.isHost) Net.hostBroadcast(s);
     else if (Net.active && !Net.isHost) Net.sendAction({ kind: 'CALL_LAST' });
-
     this.render();
   },
 
@@ -471,9 +478,9 @@ const ArenaView = {
     if (!s || s.winner !== null) return;
     const targetIdx = this._findCatchTarget();
     if (targetIdx === -1) return;
-
     if (typeof Sound !== 'undefined') Sound.click();
     if (typeof Haptics !== 'undefined') Haptics.error();
+    if (typeof SoundPacks !== 'undefined') SoundPacks.play('bruh');
 
     if (Net.active && !Net.isHost) {
       Net.sendAction({ kind: 'CATCH' });
@@ -481,7 +488,6 @@ const ArenaView = {
       if (btnCatch) btnCatch.style.display = 'none';
       return;
     }
-
     const res = GameEngine.catchUno(s, this._localIdx);
     if (!res.ok) { if (typeof Sound !== 'undefined') Sound.bad(); return; }
     this.afterAction();
@@ -511,9 +517,7 @@ const ArenaView = {
     this._tooltip = tip;
   },
 
-  _hideTooltip() {
-    if (this._tooltip) { this._tooltip.remove(); this._tooltip = null; }
-  },
+  _hideTooltip() { if (this._tooltip) { this._tooltip.remove(); this._tooltip = null; } },
 
   renderLog() {
     const el = document.getElementById('log');
@@ -527,13 +531,11 @@ const ArenaView = {
   onCardClick(card, sourceEl) {
     const s = this.state;
     if (!s) return;
-
     if (this.awaitingInput && !Modal._isOpen) {
       console.warn('[RV] awaitingInput stuck — auto-resetting');
       this.awaitingInput = false;
       this.resumeTimer();
     }
-
     if (s.winner !== null || this.awaitingInput) return;
     if (s.turn !== this._localIdx) return;
 
@@ -553,18 +555,14 @@ const ArenaView = {
     const needsTarget = abilitiesOn && card.effects.some(e => e.target === 'choose');
     const needsCard = abilitiesOn && card.effects.some(e => e.type === 'STEAL' && e.pick);
 
-    console.log('[RV] Click', card.name, { needsColor, needsTarget, needsCard, abilitiesOn });
-
     if (!needsColor && !needsTarget && !needsCard) {
       this._playWithFly(card, sourceEl, {});
       return;
     }
-
     this.awaitingInput = true;
     this.pauseTimer();
-    try {
-      this._promptChain(card, sourceEl, {});
-    } catch (e) {
+    try { this._promptChain(card, sourceEl, {}); }
+    catch (e) {
       console.error('[RV] chain error', e);
       this.awaitingInput = false;
       this.resumeTimer();
@@ -575,15 +573,9 @@ const ArenaView = {
   _promptChain(card, sourceEl, collected) {
     const s = this.state;
     const abilitiesOn = !s.rules || !s.rules.abilities || s.rules.abilities.enabled !== false;
-
     if (collected.cancelled) {
-      console.log('[RV] chain cancelled');
-      this.awaitingInput = false;
-      this.resumeTimer();
-      this.render();
-      return;
+      this.awaitingInput = false; this.resumeTimer(); this.render(); return;
     }
-
     if (card.color === 'wild' && collected.color === undefined) {
       Modal.colorPick(result => {
         if (result === null) collected.cancelled = true;
@@ -592,7 +584,6 @@ const ArenaView = {
       });
       return;
     }
-
     const needTarget = abilitiesOn && card.effects.some(e => e.target === 'choose');
     if (needTarget && collected.targetIdx === undefined) {
       Modal.pickPlayer(s, this._localIdx, result => {
@@ -602,7 +593,6 @@ const ArenaView = {
       });
       return;
     }
-
     const stealPick = abilitiesOn && card.effects.find(e => e.type === 'STEAL' && e.pick);
     if (stealPick && collected.cardUid === undefined) {
       const targetIdx = stealPick.target === 'choose'
@@ -621,8 +611,6 @@ const ArenaView = {
       });
       return;
     }
-
-    console.log('[RV] playing with choices:', collected);
     this.awaitingInput = false;
     this.resumeTimer();
     this._playWithFly(card, sourceEl, collected);
@@ -632,23 +620,15 @@ const ArenaView = {
     opts = opts || {};
     Haptics.tap();
     const turnAtClick = this.state.turn;
-
     if (Net.active && !Net.isHost) {
       this.flyCard(card, sourceEl, () => {});
       Net.sendAction({
-        kind: 'PLAY',
-        uid: card.uid,
-        color: opts.color || null,
-        targetIdx: opts.targetIdx,
-        cardUid: opts.cardUid
+        kind: 'PLAY', uid: card.uid,
+        color: opts.color || null, targetIdx: opts.targetIdx, cardUid: opts.cardUid
       });
       return;
     }
-
-    if (Settings.data.reducedMotion) {
-      this.executePlay(turnAtClick, card, opts);
-      return;
-    }
+    if (Settings.data.reducedMotion) { this.executePlay(turnAtClick, card, opts); return; }
     if (sourceEl) sourceEl.style.visibility = 'hidden';
     this.flyCard(card, sourceEl, () => this.executePlay(turnAtClick, card, opts));
   },
@@ -661,8 +641,7 @@ const ArenaView = {
       position: fixed;
       left: ${from.left}px; top: ${from.top}px;
       width: ${from.width}px; height: ${from.height}px;
-      z-index: 9999;
-      pointer-events: none;
+      z-index: 9999; pointer-events: none;
       transition: transform .38s cubic-bezier(.2,.8,.3,1), opacity .38s;
       will-change: transform;
     `;
@@ -681,11 +660,10 @@ const ArenaView = {
     const s = this.state;
     if (!s || s.winner !== null) return;
 
+    const pendingBefore = s.pendingDraw || 0;
     const res = GameEngine.playCard(s, playerIdx, card.uid, opts);
     if (!res.ok) {
-      Sound.bad();
-      Haptics.error();
-      Toast.show(res.reason);
+      Sound.bad(); Haptics.error(); Toast.show(res.reason);
       document.querySelectorAll('#hand .card').forEach(c => { c.style.visibility = ''; });
       this.render();
       return;
@@ -704,11 +682,23 @@ const ArenaView = {
     if (card.type === 'number') { Sound.play(); Haptics.play(); }
     else { Sound.ability(); Haptics.ability(); }
 
+    // ── Meme SFX hooks ─────────────────────────────────
+    if (typeof SoundPacks !== 'undefined') {
+      // Big draw resolved → boom
+      const afterPending = s.pendingDraw || 0;
+      if (pendingBefore >= 4 && afterPending === 0) SoundPacks.play('boom');
+      else if (pendingBefore >= 4 && afterPending > pendingBefore) SoundPacks.play('boom');
+      // Wild played → boom
+      else if (card.color === 'wild') SoundPacks.play('boom');
+      // Skip fired → sus
+      else if (Array.isArray(card.effects) && card.effects.some(e => e.type === 'SKIP')) SoundPacks.play('sus');
+      // Reverse → whip
+      else if (Array.isArray(card.effects) && card.effects.some(e => e.type === 'REVERSE')) SoundPacks.play('whip');
+    }
+
     if (card.effects.length) this.showAbilityBanner(card, s);
     else if (card.color === 'wild') {
-      this.showAbilityBanner(
-        { name: card.name, text: `Color → ${COLOR_META[s.activeColor].label}` }, s
-      );
+      this.showAbilityBanner({ name: card.name, text: `Color → ${COLOR_META[s.activeColor].label}` }, s);
     }
 
     Emotes.maybeBotReact(s, playerIdx, card);
@@ -719,24 +709,19 @@ const ArenaView = {
     if (Settings.data.reducedMotion) return;
     const table = document.querySelector('.table');
     if (!table) return;
-
     const el = document.createElement('div');
     el.className = 'fx-pop';
     el.style.color = COLOR_META[s.activeColor]?.hex || 'var(--accent)';
     el.textContent = card.name.toUpperCase();
     table.appendChild(el);
     setTimeout(() => el.remove(), 1050);
-
     const sub = document.createElement('div');
     sub.className = 'fx-pop';
     sub.style.fontSize = 'clamp(12px,2.6vw,17px)';
     sub.style.top = '62%';
     sub.style.color = 'var(--text-primary)';
     sub.textContent = (card.text || '').replace(/^.*?—\s*/, '');
-    if (sub.textContent) {
-      table.appendChild(sub);
-      setTimeout(() => sub.remove(), 1150);
-    }
+    if (sub.textContent) { table.appendChild(sub); setTimeout(() => sub.remove(), 1150); }
   },
 
   startTimer() {
@@ -752,18 +737,15 @@ const ArenaView = {
       if (this._timerPaused) return;
       if (this.state.winner !== null) { this.stopTimer(); return; }
       if (this.state.turn !== this._localIdx) { this.stopTimer(); return; }
-
       left--;
       const tag = document.getElementById('turnTag');
       if (tag) tag.textContent = `YOUR TURN · ${left}s`;
-
       if (left <= 0) {
         this.stopTimer();
         if (this.state.winner !== null || this.state.turn !== this._localIdx) return;
         Sound.bad(); Haptics.error();
-
+        if (typeof SoundPacks !== 'undefined') SoundPacks.play('fail');
         if (Net.active && !Net.isHost) { Net.sendAction({ kind: 'DRAW' }); return; }
-
         GameEngine.playerDraw(s, this._localIdx);
         setTimeout(() => {
           if (s.winner === null && s.turn === this._localIdx) {
@@ -777,31 +759,22 @@ const ArenaView = {
 
   pauseTimer() { this._timerPaused = true; },
   resumeTimer() { this._timerPaused = false; },
-  stopTimer() {
-    if (this._timerHandle) { clearInterval(this._timerHandle); this._timerHandle = null; }
-  },
+  stopTimer() { if (this._timerHandle) { clearInterval(this._timerHandle); this._timerHandle = null; } },
 
   showReveal(reveal) {
     if (!reveal) return;
-
     if (typeof reveal.viewerIdx === 'number' && reveal.viewerIdx !== this._localIdx) return;
-
     const overlay = document.getElementById('revealOverlay');
     const titleEl = document.getElementById('revealTitle');
     const handEl = document.getElementById('revealHand');
-    if (!overlay || !titleEl || !handEl) {
-      console.warn('[RV] Reveal overlay missing from DOM');
-      return;
-    }
+    if (!overlay || !titleEl || !handEl) return;
     const target = this.state.players[reveal.playerIdx];
     if (!target) return;
-
     this._lastRevealTs = reveal.ts || Date.now();
     this.pauseTimer();
     titleEl.textContent = `${target.avatar} ${target.name}'s Hand`;
     handEl.innerHTML = '';
     (reveal.cards || []).forEach(c => handEl.appendChild(CardRenderer.build(c, { small: true })));
-
     overlay.style.display = 'flex';
     overlay.setAttribute('aria-hidden', 'false');
   },

@@ -9,7 +9,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-
 <script>
 (function(){
   try {
@@ -23,7 +22,6 @@
   } catch (e) {}
 })();
 </script>
-
 <link rel="stylesheet" href="css/main.css">
 <link rel="stylesheet" href="css/cards.css">
 <link rel="stylesheet" href="css/arena.css">
@@ -34,7 +32,6 @@
 <body>
 <canvas id="fx" aria-hidden="true"></canvas>
 
-<!-- Reveal overlay (bypasses modal system for reliability) -->
 <div class="reveal-overlay" id="revealOverlay" aria-hidden="true" style="display:none">
   <div class="reveal-inner">
     <h2 id="revealTitle">Hand revealed</h2>
@@ -51,7 +48,6 @@
   </div>
 </div>
 
-<!-- HOME -->
 <section id="screen-home" class="screen active">
   <div class="home">
     <header class="home-head">
@@ -119,6 +115,7 @@
       <button class="link-btn" id="btnAchievements">🏅 Achievements</button>
       <button class="link-btn" id="btnCreateRoom">🌐 Create Online Room</button>
       <button class="link-btn" id="btnJoinRoom">🔗 Join a Room</button>
+      <button class="link-btn" id="btnBrowseRooms">🚪 Browse Public Rooms</button>
       <button class="link-btn" id="btnCommunity">💬 Community</button>
     </div>
 
@@ -128,7 +125,6 @@
   </div>
 </section>
 
-<!-- ROOM -->
 <section id="screen-room" class="screen">
   <div class="room-wrap">
     <header class="room-head">
@@ -198,7 +194,6 @@
   </div>
 </section>
 
-<!-- GAME -->
 <section id="screen-game" class="screen">
   <div class="arena" id="arenaRoot">
     <header class="arena-top">
@@ -257,8 +252,8 @@
       </div>
     </div>
 
-   <div class="emote-sheet" id="emoteTray" role="toolbar" aria-label="Reactions"></div>
-<div class="emote-sheet taunt-tray" id="tauntTray" role="toolbar" aria-label="Quick taunts"></div>
+    <div class="emote-sheet" id="emoteTray" role="toolbar" aria-label="Reactions"></div>
+    <div class="emote-sheet taunt-tray" id="tauntTray" role="toolbar" aria-label="Quick taunts"></div>
   </div>
 
   <div class="card-sheet" id="cardSheet" aria-hidden="true">
@@ -274,7 +269,6 @@
   </div>
 </section>
 
-<!-- WIN -->
 <section id="screen-win" class="screen">
   <div class="win-wrap">
     <div class="win-panel">
@@ -313,6 +307,7 @@
 
 <script src="js/fx/ParticleCanvas.js"></script>
 <script src="js/audio/SoundEngine.js"></script>
+<script src="js/audio/SoundPacks.js"></script>
 <script src="js/audio/Haptics.js"></script>
 
 <script src="js/ui/CardRenderer.js"></script>
@@ -323,6 +318,9 @@
 <script src="js/ui/Tutorial.js"></script>
 <script src="js/ui/PrivacyScreen.js"></script>
 <script src="js/ui/LobbyView.js"></script>
+<script src="js/ui/ProfileEdit.js"></script>
+<script src="js/ui/RoomBrowser.js"></script>
+<script src="js/ui/RoomExtras.js"></script>
 <script src="js/ui/RoomView.js"></script>
 <script src="js/ui/ArenaView.js"></script>
 <script src="js/ui/RuleStudioView.js"></script>
@@ -330,5 +328,18 @@
 <script src="js/ui/Modal.js"></script>
 
 <script src="js/app.js"></script>
+<script>
+/* Post-load belt-and-braces */
+window.addEventListener('load', function () {
+  try { if (window.Taunts && Taunts.mount) Taunts.mount(); }
+  catch (e) { console.error('[boot] Taunts.mount failed', e); }
+  try { if (window.ShareRoom && ShareRoom.mount) ShareRoom.mount(); }
+  catch (e) { console.error('[boot] ShareRoom.mount failed', e); }
+  try { if (window.RoomBrowser && RoomBrowser.mount) RoomBrowser.mount(); }
+  catch (e) { console.error('[boot] RoomBrowser.mount failed', e); }
+  try { if (window.RoomExtras && RoomExtras.mount) RoomExtras.mount(); }
+  catch (e) { console.error('[boot] RoomExtras.mount failed', e); }
+});
+</script>
 </body>
 </html>

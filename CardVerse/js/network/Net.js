@@ -1,6 +1,6 @@
 /* ============================================================
-   js/network/Net.js — host-authority WebSocket client (v2.12)
-   Adds setBadge(), sendTaunt(), sendRematchRequest().
+   js/network/Net.js — v2.13
+   Adds: avatarImage in create/join, listRooms().
    ============================================================ */
 const Net = {
   ws: null,
@@ -101,14 +101,15 @@ const Net = {
         await this.connect();
         const sess = this._loadSession();
         if (sess && sess.code && sess.playerId) {
+          const me = this.room && this.room.players &&
+                     this.room.players[this.myIndex];
           this._send({
             type: 'rejoin',
             code: sess.code,
             playerId: sess.playerId,
-            playerName: (this.room && this.room.players &&
-                        this.room.players[this.myIndex] && this.room.players[this.myIndex].name) || 'Player',
-            avatar: (this.room && this.room.players &&
-                     this.room.players[this.myIndex] && this.room.players[this.myIndex].avatar) || '🙂',
+            playerName: (me && me.name) || 'Player',
+            avatar: (me && me.avatar) || '🙂',
+            avatarImage: (me && me.avatarImage) || null,
             badgeId: (typeof Achievements !== 'undefined' && Achievements.getBadgeId)
               ? Achievements.getBadgeId() : null
           });
@@ -150,8 +151,7 @@ const Net = {
         this.room = msg.room || this.room;
         this.playerId = msg.playerId || msg.you;
         this.myIndex = (this.room && this.room.players)
-          ? this.room.players.findIndex(p => p.id === this.playerId)
-          : -1;
+          ? this.room.players.findIndex(p => p.id === this.playerId) : -1;
         this.isHost = this._deriveIsHost(msg);
         this._saveSession(msg.code, this.playerId);
         break;
@@ -162,8 +162,7 @@ const Net = {
         this.room = msg.room || this.room;
         this.playerId = msg.playerId || msg.you;
         this.myIndex = (this.room && this.room.players)
-          ? this.room.players.findIndex(p => p.id === this.playerId)
-          : -1;
+          ? this.room.players.findIndex(p => p.id === this.playerId) : -1;
         this.isHost = this._deriveIsHost(msg);
         this._saveSession(msg.code, this.playerId);
         this._reconnectAttempts = 0;
@@ -171,15 +170,16 @@ const Net = {
       }
 
       case 'room_update':
-      case 'game_start':
       case 'start':
       case 'cancel_game': {
         if (msg.room) {
           this.room = msg.room;
           this.myIndex = this.room.players
-            ? this.room.players.findIndex(p => p.id === this.playerId)
-            : -1;
+            ? this.room.players.findIndex(p => p.id === this.playerId) : -1;
           this.isHost = this._deriveIsHost({ room: this.room });
+          if (this.room.soundPack && typeof SoundPacks !== 'undefined') {
+            SoundPacks.set(this.room.soundPack);
+          }
         }
         break;
       }
@@ -213,14 +213,27 @@ const Net = {
     return false;
   },
 
+  _avatarPayload() {
+    const p = (typeof LobbyView !== 'undefined' && LobbyView.profile) || {};
+    return {
+      name: p.name || 'Player',
+      playerName: p.name || 'Player',
+      avatar: p.avatar || '🙂',
+      avatarImage: p.avatarImage || null,
+      badgeId: (typeof Achievements !== 'undefined' && Achievements.getBadgeId)
+        ? Achievements.getBadgeId() : null
+    };
+  },
+
   async create(name, avatar) {
     this._clearSession();
     this._wantToReconnect = true;
     this._reconnectAttempts = 0;
     await this.connect();
-    const badgeId = (typeof Achievements !== 'undefined' && Achievements.getBadgeId)
-      ? Achievements.getBadgeId() : null;
-    this._send({ type: 'create', name, playerName: name, avatar, badgeId });
+    const pay = this._avatarPayload();
+    if (name) { pay.name = name; pay.playerName = name; }
+    if (avatar) pay.avatar = avatar;
+    this._send({ type: 'create', ...pay });
   },
 
   async join(code, name, avatar) {
@@ -228,13 +241,10 @@ const Net = {
     this._wantToReconnect = true;
     this._reconnectAttempts = 0;
     await this.connect();
-    const badgeId = (typeof Achievements !== 'undefined' && Achievements.getBadgeId)
-      ? Achievements.getBadgeId() : null;
-    this._send({
-      type: 'join',
-      code: code.toUpperCase(),
-      name, playerName: name, avatar, badgeId
-    });
+    const pay = this._avatarPayload();
+    if (name) { pay.name = name; pay.playerName = name; }
+    if (avatar) pay.avatar = avatar;
+    this._send({ type: 'join', code: code.toUpperCase(), ...pay });
   },
 
   leave() {
@@ -244,12 +254,10 @@ const Net = {
     const ws = this.ws;
     this.ws = null;
     if (ws) { try { ws.close(); } catch (e) {} }
-
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
-
     this.active = false;
     this.isHost = false;
     this.room = null;
@@ -268,27 +276,21 @@ const Net = {
   cancelGame()       { this._send({ type: 'cancel_game' }); },
   clearChat()        { this._send({ type: 'clear_chat' }); },
   setBadge(badgeId)  { this._send({ type: 'set_badge', badgeId: badgeId || null }); },
-
+  listRooms()        { this._send({ type: 'list_rooms' }); },
   sendTaunt(text) {
     const t = String(text || '').slice(0, 80);
-    if (!t) return;
-    this._send({ type: 'taunt', text: t });
+    if (t) this._send({ type: 'taunt', text: t });
   },
-
-  sendRematchRequest() {
-    this._send({ type: 'rematch_request' });
-  },
+  sendRematchRequest() { this._send({ type: 'rematch_request' }); },
 
   hostBroadcast(state) {
     if (!this.active || !this.isHost || !state) return;
     this._send({ type: 'state_update', state: this.serialize(state) });
   },
-
   hostStartGame(state, rulesKey) {
     if (!this.active || !this.isHost) return;
     this._send({ type: 'start', state: this.serialize(state), rulesKey });
   },
-
   sendAction(action) {
     if (!this.active) return;
     this._send({ type: 'action', action });
@@ -301,10 +303,7 @@ const Net = {
     if (b === undefined) {
       state = (typeof ArenaView !== 'undefined' && ArenaView.state) || null;
       playerId = a;
-    } else {
-      state = a;
-      playerId = b;
-    }
+    } else { state = a; playerId = b; }
     if (!state || !Array.isArray(state.players)) return -1;
     return state.players.findIndex(p => p.id === playerId);
   }

@@ -1,19 +1,15 @@
 /* ============================================================
    app.js — boot + GameFlow
-   v2.11: applyStateUpdate now polls for state.reveal and shows
-          the reveal modal for the correct (viewing) player.
+   v2.13: browse public rooms, soundPacks, profile hookup.
    ============================================================ */
 
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 
 const Toast = {
-  _queue: [],
-  _busy: false,
-
+  _queue: [], _busy: false,
   show(msg) { this._queue.push({ kind: 'plain', msg }); this._pump(); },
   achievement(def) { this._queue.push({ kind: 'ach', def }); this._pump(); },
-
   _pump() {
     if (this._busy) return;
     const item = this._queue.shift();
@@ -23,7 +19,6 @@ const Toast = {
     else this._showPlain(item.msg);
   },
   _done() { this._busy = false; setTimeout(() => this._pump(), 120); },
-
   _showPlain(msg) {
     const t = document.createElement('div');
     t.className = 'toast';
@@ -32,7 +27,6 @@ const Toast = {
     setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; }, 1500);
     setTimeout(() => { t.remove(); this._done(); }, 1900);
   },
-
   _showAch(def) {
     const el = document.createElement('div');
     el.className = 'achievement-toast';
@@ -42,8 +36,7 @@ const Toast = {
         <div class="ach-label">ACHIEVEMENT</div>
         <div class="ach-name">${esc(def.name || '')}</div>
         <div class="ach-desc">${esc(def.desc || '')}</div>
-      </div>
-    `;
+      </div>`;
     document.body.appendChild(el);
     if (typeof Sound !== 'undefined' && Sound.achievement) Sound.achievement();
     if (typeof Haptics !== 'undefined') Haptics.win();
@@ -68,18 +61,9 @@ function openCommunityModal() {
       <div class="ch-title">Join the RuleVerse</div>
       <div class="ch-sub">Play, share decks, and vote on what's next.</div>
     </div>
-    <div class="community-card">
-      <b>🎨 Vote for upcoming universes</b><br>
-      Head to <code>#universe-votes</code> in the Discord and pick your favourite.
-    </div>
-    <div class="community-card">
-      <b>🃏 Share custom decks</b><br>
-      Paste your Deck Studio JSON into <code>#deck-share</code>.
-    </div>
-    <div class="community-card">
-      <b>🐛 Report bugs &amp; ideas</b><br>
-      Drop them in <code>#feedback</code>.
-    </div>
+    <div class="community-card"><b>🎨 Vote for upcoming universes</b><br>Head to <code>#universe-votes</code> in the Discord.</div>
+    <div class="community-card"><b>🃏 Share custom decks</b><br>Paste your Deck Studio JSON into <code>#deck-share</code>.</div>
+    <div class="community-card"><b>🐛 Report bugs &amp; ideas</b><br>Drop them in <code>#feedback</code>.</div>
     <button class="btn primary big" style="width:100%;margin-top:16px" id="joinDiscord">Join Discord →</button>
     <button class="btn ghost big" style="width:100%;margin-top:8px" id="communityClose">Close</button>
   `);
@@ -92,20 +76,17 @@ function openCommunityModal() {
 }
 
 const GameFlow = {
-  lastConfig: null,
-  _winnerShown: false,
+  lastConfig: null, _winnerShown: false, _rematchPending: false,
 
   startGame() {
     Net.active = false;
     Net.isHost = false;
-
     const lv = LobbyView;
     const count = lv.players;
     const bots = Math.min(lv.bots, count - 1);
-
-    const names = ['You', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8'];
-    const botNames = ['Nova', 'Rift', 'Echo', 'Vex', 'Zephyr', 'Onyx', 'Pixel'];
-    const botAvatars = ['🤖', '👾', '🦊', '🐲', '🦉', '🐺', '👽'];
+    const names = ['You','Player 2','Player 3','Player 4','Player 5','Player 6','Player 7','Player 8'];
+    const botNames = ['Nova','Rift','Echo','Vex','Zephyr','Onyx','Pixel'];
+    const botAvatars = ['🤖','👾','🦊','🐲','🦉','🐺','👽'];
     const avatarPool = (typeof AVATARS !== 'undefined' && Array.isArray(AVATARS))
       ? AVATARS : ['🙂','😎','🦊','🐼','🐸','🐙','🦄','🐯'];
 
@@ -137,7 +118,6 @@ const GameFlow = {
     const universeName = lv.customDef
       ? `${lv.customDef.name} (custom)`
       : `${UNIVERSES[lv.universeId].icon} ${UNIVERSES[lv.universeId].name}`;
-
     const rulesLabel = RULE_PRESETS[RuleStudioView.presetKey]?.name || 'Custom';
 
     this.lastConfig = {
@@ -149,17 +129,16 @@ const GameFlow = {
     };
 
     const state = GameEngine.create({
-      players,
-      universeId: lv.universeId,
-      customDef: lv.customDef,
-      rules: this.lastConfig.rules,
-      universeName
+      players, universeId: lv.universeId, customDef: lv.customDef,
+      rules: this.lastConfig.rules, universeName
     });
     state.rulesLabel = rulesLabel;
 
     if (typeof Achievements !== 'undefined') Achievements.onMatchStart();
     if (typeof PrivacyScreen !== 'undefined' && PrivacyScreen.reset) PrivacyScreen.reset();
     this._winnerShown = false;
+
+    if (typeof SoundPacks !== 'undefined') SoundPacks.set('default');
 
     show('screen-game');
     ArenaView.mount(state, 0);
@@ -175,9 +154,7 @@ const GameFlow = {
     if ((room.players || []).length < 2) { Toast.show('Need at least 2 players'); return; }
 
     const key = room.rules || room.rulesKey;
-    const rules = RULE_PRESETS[key]
-      ? RULE_PRESETS[key].rules()
-      : defaultRules();
+    const rules = RULE_PRESETS[key] ? RULE_PRESETS[key].rules() : defaultRules();
     const safeRules = (typeof sanitizeRules === 'function') ? sanitizeRules(rules) : rules;
 
     const players = (room.players || []).map(p =>
@@ -188,16 +165,14 @@ const GameFlow = {
       : (room.universeName || room.universe || room.universeId || 'Marvel');
 
     const state = GameEngine.create({
-      players,
-      universeId: room.universe || room.universeId || 'marvel',
-      customDef: room.customDef || null,
-      rules: safeRules,
-      universeName
+      players, universeId: room.universe || room.universeId || 'marvel',
+      customDef: room.customDef || null, rules: safeRules, universeName
     });
     state.rulesLabel = RULE_PRESETS[key]?.name || 'Custom';
 
     if (typeof Achievements !== 'undefined') Achievements.onMatchStart();
     this._winnerShown = false;
+    this._rematchPending = false;
 
     Net.hostStartGame(state, key);
     this.enterMultiplayerGame(state, key);
@@ -206,6 +181,11 @@ const GameFlow = {
   enterMultiplayerGame(state, rulesKey) {
     ArenaView._cardPool = new Map();
     this._winnerShown = false;
+
+    if (typeof SoundPacks !== 'undefined') {
+      const pack = (Net.room && Net.room.soundPack) || 'default';
+      SoundPacks.set(pack);
+    }
 
     const localIdx = state.players.findIndex(p => p.id === Net.playerId);
     show('screen-game');
@@ -218,10 +198,7 @@ const GameFlow = {
 
   applyStateUpdate(state) {
     if (!state) return;
-    if (!ArenaView.state) {
-      this.enterMultiplayerGame(state, 'classic');
-      return;
-    }
+    if (!ArenaView.state) { this.enterMultiplayerGame(state, 'classic'); return; }
     ArenaView.state = state;
     ArenaView.render();
     ArenaView.renderLog();
@@ -232,7 +209,6 @@ const GameFlow = {
     const s = ArenaView.state;
     if (!s || s.winner !== null) return;
     if (!fromId || !action) return;
-
     const idx = s.players.findIndex(p => p.id === fromId);
     if (idx === -1) return;
 
@@ -241,11 +217,8 @@ const GameFlow = {
       if (res && res.ok) ArenaView.afterAction();
       return;
     }
-
     if (action.kind === 'CALL_LAST') {
-      if (!Array.isArray(s.lastCardCalled)) {
-        s.lastCardCalled = s.players.map(() => false);
-      }
+      if (!Array.isArray(s.lastCardCalled)) s.lastCardCalled = s.players.map(() => false);
       if (s.players[idx].hand.length === 1) {
         s.lastCardCalled[idx] = true;
         GameEngine.log(`<b>${esc(s.players[idx].name)}</b> calls LAST CARD!`, 'hot');
@@ -253,7 +226,6 @@ const GameFlow = {
       }
       return;
     }
-
     if (s.turn !== idx) return;
 
     if (action.kind === 'PLAY') {
@@ -271,13 +243,9 @@ const GameFlow = {
         targetIdx: action.targetIdx,
         cardUid: action.cardUid
       });
-    } else if (action.kind === 'DRAW') {
-      res = GameEngine.playerDraw(s, idx);
-    } else if (action.kind === 'PASS') {
-      res = GameEngine.playerPass(s, idx);
-    } else {
-      return;
-    }
+    } else if (action.kind === 'DRAW') res = GameEngine.playerDraw(s, idx);
+    else if (action.kind === 'PASS') res = GameEngine.playerPass(s, idx);
+    else return;
 
     if (!res || !res.ok) return;
     ArenaView.afterAction();
@@ -286,7 +254,6 @@ const GameFlow = {
   showWinner(idx) {
     if (this._winnerShown) return;
     this._winnerShown = true;
-
     ArenaView.stopTimer();
     if (GameEngine._botTimer) { clearTimeout(GameEngine._botTimer); GameEngine._botTimer = null; }
 
@@ -302,36 +269,41 @@ const GameFlow = {
     }
     const p = s.players[idx];
     if (!p) return;
-
     const isMe = (Net.active && s.players[idx].id === Net.playerId) ||
                  (!Net.active && idx === 0);
-
     if (typeof Achievements !== 'undefined') Achievements.onMatchEnd(idx, s);
 
     document.getElementById('winEmoji').textContent = isMe ? '🏆' : '💀';
     document.getElementById('winTitle').textContent = isMe ? 'Victory!' : `${p.name} wins`;
     document.getElementById('winSub').textContent = isMe
-      ? 'You emptied your hand first.'
-      : 'Better luck next round.';
+      ? 'You emptied your hand first.' : 'Better luck next round.';
 
     const elapsed = Math.round((Date.now() - s.startedAt) / 1000);
     const abilities = s.players.reduce((a, x) => a + (x.stats?.abilities || 0), 0);
-
     document.getElementById('winStats').innerHTML = `
-      <div class="win-stat"><div class="sv">${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}</div><div class="sk">Duration</div></div>
+      <div class="win-stat"><div class="sv">${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,'0')}</div><div class="sk">Duration</div></div>
       <div class="win-stat"><div class="sv">${s.turnCount}</div><div class="sk">Turns</div></div>
       <div class="win-stat"><div class="sv">${abilities}</div><div class="sk">Abilities</div></div>
       <div class="win-stat"><div class="sv">${s.players.length}</div><div class="sk">Players</div></div>
     `;
 
+    const btnRematch = document.getElementById('btnRematch');
+    if (btnRematch) {
+      if (Net.active) btnRematch.textContent = Net.isHost ? 'Rematch Now' : 'Request Rematch';
+      else btnRematch.textContent = 'Rematch';
+    }
+
     show('screen-win');
     if (isMe) { Sound.win(); if (typeof Haptics !== 'undefined') Haptics.win(); }
     else { Sound.lose(); if (typeof Haptics !== 'undefined') Haptics.lose(); }
 
+    // Meme SFX on win
+    if (typeof SoundPacks !== 'undefined') SoundPacks.play('airhorn');
+
     const cx = innerWidth / 2, cy = innerHeight * .35;
     for (let i = 0; i < 7; i++) {
       setTimeout(() => {
-        const colors = ['#E63946', '#3A7BD5', '#2A9D8F', '#E9C46A', '#9B5DE5', '#FF4D6D'];
+        const colors = ['#E63946','#3A7BD5','#2A9D8F','#E9C46A','#9B5DE5','#FF4D6D'];
         FX.burst(cx + (Math.random() - .5) * 320, cy + (Math.random() - .5) * 140,
           colors[rnd(colors.length)], 34, 1.3);
       }, i * 180);
@@ -340,34 +312,34 @@ const GameFlow = {
 
   rematch() {
     if (Net.active) {
-      ArenaView.state = null;
-      show('screen-room');
-      RoomView.render();
+      const s = ArenaView.state;
+      const gameEnded = !s || s.winner !== null;
+      if (!gameEnded) return;
+      if (Net.isHost) { this.startMultiplayer(); }
+      else {
+        Net.sendRematchRequest();
+        Toast.show('Rematch requested');
+        const btn = document.getElementById('btnRematch');
+        if (btn) { btn.textContent = 'Requested ✓'; btn.disabled = true; }
+      }
       return;
     }
-
     if (!this.lastConfig) return;
     ArenaView.stopTimer();
     if (GameEngine._botTimer) { clearTimeout(GameEngine._botTimer); GameEngine._botTimer = null; }
     this._winnerShown = false;
-
     const cfg = this.lastConfig;
     cfg.players.forEach(p => {
       p.hand = []; p.shield = 0; p.immune = false;
       p.stats = { played: 0, drawn: 0, abilities: 0 };
     });
     const state = GameEngine.create({
-      players: cfg.players,
-      universeId: cfg.universeId,
-      customDef: cfg.customDef,
-      rules: cfg.rules,
-      universeName: cfg.universeName
+      players: cfg.players, universeId: cfg.universeId,
+      customDef: cfg.customDef, rules: cfg.rules, universeName: cfg.universeName
     });
     state.rulesLabel = RULE_PRESETS[RuleStudioView.presetKey]?.name || 'Custom';
-
     if (typeof Achievements !== 'undefined') Achievements.onMatchStart();
     if (typeof PrivacyScreen !== 'undefined' && PrivacyScreen.reset) PrivacyScreen.reset();
-
     show('screen-game');
     ArenaView.mount(state, 0);
     ArenaView.afterAction();
@@ -406,6 +378,66 @@ function wireNet() {
     const from = msg.playerId || msg.fromId || msg.from;
     GameFlow.applyRemoteAction(from, msg.action);
   });
+
+  Net.on('rematch_request', msg => {
+    if (!Net.isHost) return;
+    const s = ArenaView.state;
+    if (s && s.winner === null) return;
+    if (GameFlow._rematchPending) return;
+    GameFlow._rematchPending = true;
+    Toast.show(`${msg.fromName || 'A player'} started a rematch`);
+    setTimeout(() => {
+      GameFlow._rematchPending = false;
+      const s2 = ArenaView.state;
+      if (Net.isHost && (!s2 || s2.winner !== null)) GameFlow.startMultiplayer();
+    }, 450);
+  });
+}
+
+function checkUrlInvite() {
+  let code = null;
+  try {
+    const params = new URLSearchParams(location.search);
+    code = params.get('room');
+  } catch (e) {}
+  if (!code) {
+    const m = location.pathname.match(/^\/r\/([A-Za-z0-9]{4,8})\/?$/);
+    if (m) code = m[1];
+  }
+  if (!code) return;
+  code = String(code).toUpperCase();
+  if (!/^[A-Z0-9]{4,8}$/.test(code)) return;
+
+  setTimeout(() => {
+    if (typeof Modal === 'undefined') return;
+    const m = Modal.open(`
+      <h2>🔗 Join Room</h2>
+      <div class="hint">You've been invited to a RuleVerse room.</div>
+      <div class="code-card" style="margin:14px 0">
+        <div class="cc-label">Room Code</div>
+        <div class="cc-code">${esc(code)}</div>
+      </div>
+      <button class="btn primary big" id="urlJoinGo" style="width:100%">Join Room</button>
+      <button class="btn ghost big" id="urlJoinCancel" style="width:100%;margin-top:8px">Not now</button>
+    `);
+    if (!m) return;
+    m.querySelector('#urlJoinGo').onclick = async () => {
+      const btn = m.querySelector('#urlJoinGo');
+      btn.disabled = true; btn.textContent = 'Joining…';
+      try {
+        await Net.join(code, LobbyView.profile.name, LobbyView.profile.avatar);
+        setTimeout(() => { if (Modal._isOpen) Modal.close(); }, 120);
+        try { history.replaceState(null, '', '/'); } catch (e) {}
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Join Room';
+        Toast.show('Could not reach the server');
+      }
+    };
+    m.querySelector('#urlJoinCancel').onclick = () => {
+      Modal.close();
+      try { history.replaceState(null, '', '/'); } catch (e) {}
+    };
+  }, 400);
 }
 
 (function boot() {
@@ -414,6 +446,10 @@ function wireNet() {
   LobbyView.init();
   RoomView.init();
   wireNet();
+  if (typeof Taunts !== 'undefined') Taunts.mount();
+  if (typeof ShareRoom !== 'undefined') ShareRoom.mount();
+  if (typeof RoomBrowser !== 'undefined') RoomBrowser.mount();
+  if (typeof RoomExtras !== 'undefined') RoomExtras.mount();
 
   document.getElementById('btnDraw').onclick = () => {
     const s = ArenaView.state;
@@ -446,8 +482,7 @@ function wireNet() {
     p.hand.sort((a, b) =>
       colorOrder[a.color] - colorOrder[b.color] ||
       typeOrder[a.type] - typeOrder[b.type] ||
-      (a.value ?? 99) - (b.value ?? 99)
-    );
+      (a.value ?? 99) - (b.value ?? 99));
     if (ArenaView._cardPool) ArenaView._cardPool.clear();
     const handEl = document.getElementById('hand');
     if (handEl) handEl.innerHTML = '';
@@ -497,6 +532,11 @@ function wireNet() {
     }
   };
 
+  document.getElementById('btnBrowseRooms').onclick = () => {
+    Sound.click();
+    if (typeof RoomBrowser !== 'undefined') RoomBrowser.open();
+  };
+
   document.getElementById('btnJoinRoom').onclick = () => {
     Sound.click();
     const m = Modal.open(`
@@ -534,7 +574,6 @@ function wireNet() {
     Sound.click();
     if (typeof Achievements !== 'undefined') Achievements.openHistoryModal();
   };
-
   const btnComm = document.getElementById('btnCommunity');
   if (btnComm) btnComm.onclick = () => { Sound.click(); openCommunityModal(); };
 
@@ -544,17 +583,13 @@ function wireNet() {
       return;
     }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-
     if (e.key === 'Escape' && Modal._isOpen && !Modal._forceChoice) { Modal.close(); return; }
 
     const inGame = document.getElementById('screen-game').classList.contains('active');
     if (!inGame) return;
 
     if (e.key === 'd') document.getElementById('btnDraw').click();
-    if (e.key === ' ') {
-      e.preventDefault();
-      document.getElementById('btnPass').click();
-    }
+    if (e.key === ' ') { e.preventDefault(); document.getElementById('btnPass').click(); }
     if (e.key === 'c' || e.key === 'C') {
       const bar = document.getElementById('lastCardBar');
       if (bar && bar.style.display !== 'none') {
@@ -565,10 +600,14 @@ function wireNet() {
       const cbtn = document.getElementById('btnCatchUno');
       if (cbtn && cbtn.style.display !== 'none') cbtn.click();
     }
+    if (e.key === 't' || e.key === 'T') {
+      if (typeof Taunts !== 'undefined') Taunts.toggle();
+    }
   });
 
   const unlock = () => {
     if (typeof Sound !== 'undefined' && !Sound.muted) Sound.click();
+    if (typeof SoundPacks !== 'undefined') SoundPacks.unlock();
     document.removeEventListener('pointerdown', unlock);
   };
   document.addEventListener('pointerdown', unlock);
@@ -576,6 +615,7 @@ function wireNet() {
   window.RuleVerse = {
     UNIVERSES, RULE_SCHEMA, RULE_PRESETS, defaultRules,
     GameEngine, RuleEngine, BotAI, ArenaView, GameFlow, Net, RoomView,
+    Taunts, ShareRoom, RoomBrowser, RoomExtras, SoundPacks, ProfileEdit,
     Achievements, Settings, Haptics,
     simulate(games = 200, playerCount = 4, universeId = 'marvel', presetKey = 'classic') {
       const results = { wins: {}, turns: 0, errors: 0, maxTurns: 0 };
@@ -585,8 +625,7 @@ function wireNet() {
           players.push(makePlayer({ name: 'P' + i, avatar: '🤖', isBot: true }));
         const st = GameEngine.create({
           players, universeId, customDef: null,
-          rules: RULE_PRESETS[presetKey].rules(),
-          universeName: universeId
+          rules: RULE_PRESETS[presetKey].rules(), universeName: universeId
         });
         let guard = 0;
         try {
@@ -644,6 +683,7 @@ function wireNet() {
     }
   };
 
+  checkUrlInvite();
   console.log('%c RULEVERSE ', 'background:linear-gradient(90deg,#FF4D6D,#9B5DE5);color:#fff;font-weight:900;padding:3px 8px;border-radius:4px',
     '\nMultiplayer wired. Start the server with: cd server && npm start');
 })();

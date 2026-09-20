@@ -1,10 +1,7 @@
 /* ============================================================
-   RuleVerse relay server — v2.12
-   - static file server (path-traversal safe)
-   - /r/ABCDE rewrite → index.html (invite links)
-   - WebSocket relay (host authority, no game logic)
-   - 30s heartbeat
-   - taunt + rematch_request relays
+   RuleVerse relay server — v2.13
+   Adds: public room list, soundPack, isPublic, cleanup,
+         avatarImage passthrough.
    ============================================================ */
 
 const http = require('http');
@@ -34,8 +31,6 @@ function serveStatic(req, res) {
   catch (e) { res.writeHead(400).end('Bad request'); return; }
 
   if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
-
-  // /r/ABCDE → serve index.html so invite links work
   if (/^\/r\/[A-Z0-9]{4,8}\/?$/i.test(urlPath)) urlPath = '/index.html';
 
   const safe = path.normalize(path.join(ROOT, urlPath));
@@ -59,8 +54,7 @@ function serveStatic(req, res) {
 }
 
 const server = http.createServer(serveStatic);
-
-const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
+const wss = new WebSocketServer({ server, maxPayload: 128 * 1024 });
 
 const rooms = new Map();
 
@@ -72,7 +66,7 @@ function genCode() {
 }
 
 function send(ws, obj) {
-  if (ws.readyState !== ws.OPEN) return;
+  if (!ws || ws.readyState !== ws.OPEN) return;
   try { ws.send(JSON.stringify(obj)); } catch (e) {}
 }
 
@@ -98,7 +92,6 @@ wss.on('connection', (ws) => {
     try { msg = JSON.parse(raw.toString()); }
     catch (e) { return; }
     if (!msg || typeof msg.type !== 'string') return;
-
     try { handleMessage(ws, msg); }
     catch (e) { console.error('[msg]', msg.type, e); }
   });
@@ -109,16 +102,26 @@ wss.on('connection', (ws) => {
 
 const heartbeat = setInterval(() => {
   for (const ws of wss.clients) {
-    if (ws.isAlive === false) {
-      try { ws.terminate(); } catch (e) {}
-      continue;
-    }
+    if (ws.isAlive === false) { try { ws.terminate(); } catch (e) {} continue; }
     ws.isAlive = false;
     try { ws.ping(); } catch (e) {}
   }
 }, 30000);
 
-wss.on('close', () => clearInterval(heartbeat));
+// Prune empty/stale rooms every 60s
+const cleanup = setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms.entries()) {
+    const humanCount = Array.from(room.clients.values()).filter(p => !p.isBot).length;
+    const idleMs = now - (room.lastActivity || room.createdAt || now);
+    if (humanCount === 0 && idleMs > 60 * 1000) rooms.delete(code);
+    else if (idleMs > 30 * 60 * 1000) rooms.delete(code);
+  }
+}, 60000);
+
+wss.on('close', () => { clearInterval(heartbeat); clearInterval(cleanup); });
+
+function touchRoom(room) { room.lastActivity = Date.now(); }
 
 function handleMessage(ws, msg) {
   switch (msg.type) {
@@ -140,12 +143,14 @@ function handleMessage(ws, msg) {
     case 'taunt':           return onTaunt(ws, msg);
     case 'rematch_request': return onRematchRequest(ws, msg);
     case 'set_badge':       return onSetBadge(ws, msg);
+    case 'list_rooms':      return onListRooms(ws);
     default:                return;
   }
 }
 
 function makeRoom(name, universe, rules) {
   const code = genCode();
+  const now = Date.now();
   const room = {
     code,
     host: null,
@@ -154,7 +159,11 @@ function makeRoom(name, universe, rules) {
     universe: universe || 'marvel',
     rules: rules || 'classic',
     started: false,
-    chat: []
+    chat: [],
+    soundPack: 'default',
+    isPublic: true,
+    createdAt: now,
+    lastActivity: now
   };
   rooms.set(code, room);
   return room;
@@ -167,17 +176,27 @@ function roomSummary(room) {
     universe: room.universe,
     rules: room.rules,
     started: room.started,
+    soundPack: room.soundPack,
+    isPublic: room.isPublic,
     hostId: room.host ? room.host.playerId : null,
     players: Array.from(room.clients.values()).map(p => ({
       id: p.playerId,
       name: p.name,
       avatar: p.avatar,
+      avatarImage: p.avatarImage || null,
       isBot: !!p.isBot,
       isHost: !!p.isHost,
       connected: true,
       badgeId: p.badgeId || null
     }))
   };
+}
+
+function normaliseAvatarImage(v) {
+  if (typeof v !== 'string') return null;
+  if (!v.startsWith('data:image/')) return null;
+  if (v.length > 40000) return null; // ~30 KB raw → 40 KB base64
+  return v;
 }
 
 function onCreate(ws, msg) {
@@ -190,10 +209,12 @@ function onCreate(ws, msg) {
     playerId: ws.playerId,
     name: msg.playerName || msg.name || 'Host',
     avatar: msg.avatar || '🙂',
+    avatarImage: normaliseAvatarImage(msg.avatarImage),
     isBot: false,
     isHost: true,
     badgeId: typeof msg.badgeId === 'string' ? msg.badgeId.slice(0, 32) : null
   });
+  touchRoom(room);
   send(ws, { type: 'created', code: room.code, you: ws.playerId });
   roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
 }
@@ -211,10 +232,12 @@ function onJoin(ws, msg) {
     playerId: ws.playerId,
     name: msg.playerName || msg.name || 'Player',
     avatar: msg.avatar || '🙂',
+    avatarImage: normaliseAvatarImage(msg.avatarImage),
     isBot: false,
     isHost: false,
     badgeId: typeof msg.badgeId === 'string' ? msg.badgeId.slice(0, 32) : null
   });
+  touchRoom(room);
   send(ws, { type: 'joined', code: room.code, you: ws.playerId });
   roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
 }
@@ -238,10 +261,12 @@ function onRejoin(ws, msg) {
     playerId: msg.playerId,
     name: msg.playerName || msg.name || 'Player',
     avatar: msg.avatar || '🙂',
+    avatarImage: normaliseAvatarImage(msg.avatarImage),
     isBot: false,
     isHost: ws.isHost,
     badgeId: typeof msg.badgeId === 'string' ? msg.badgeId.slice(0, 32) : null
   });
+  touchRoom(room);
   send(ws, { type: 'rejoined', code: room.code, you: ws.playerId, isHost: ws.isHost, room: roomSummary(room) });
   roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) }, ws);
 }
@@ -251,6 +276,7 @@ function onLeave(ws) {
   if (!room) return;
   const wasHost = room.host === ws;
   room.clients.delete(ws);
+  touchRoom(room);
 
   if (wasHost) {
     roomBroadcast(room.code, { type: 'room_closed' });
@@ -267,6 +293,9 @@ function onUpdateRoom(ws, msg) {
   if (typeof msg.name === 'string') room.name = msg.name.slice(0, 40);
   if (typeof msg.universe === 'string') room.universe = msg.universe;
   if (typeof msg.rules === 'string') room.rules = msg.rules;
+  if (msg.soundPack === 'default' || msg.soundPack === 'meme') room.soundPack = msg.soundPack;
+  if (typeof msg.isPublic === 'boolean') room.isPublic = msg.isPublic;
+  touchRoom(room);
   roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
 }
 
@@ -277,8 +306,10 @@ function onAddBot(ws, msg) {
   const botId = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
   room.clients.set({ readyState: 3 }, {
     playerId: botId, name: msg.name || 'Bot',
-    avatar: msg.avatar || '🤖', isBot: true, isHost: false, badgeId: null
+    avatar: msg.avatar || '🤖', avatarImage: null,
+    isBot: true, isHost: false, badgeId: null
   });
+  touchRoom(room);
   roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
 }
 
@@ -288,6 +319,7 @@ function onRemoveBot(ws, msg) {
   for (const [clientWs, info] of room.clients.entries()) {
     if (info.isBot && info.playerId === msg.playerId) { room.clients.delete(clientWs); break; }
   }
+  touchRoom(room);
   roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
 }
 
@@ -302,6 +334,7 @@ function onKick(ws, msg) {
       break;
     }
   }
+  touchRoom(room);
   roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
 }
 
@@ -309,6 +342,7 @@ function onStart(ws, msg) {
   const room = rooms.get(ws.roomCode);
   if (!room || room.host !== ws) return;
   room.started = true;
+  touchRoom(room);
   roomBroadcast(room.code, {
     type: 'start',
     state: msg.state,
@@ -322,18 +356,21 @@ function onCancelGame(ws) {
   const room = rooms.get(ws.roomCode);
   if (!room || room.host !== ws) return;
   room.started = false;
+  touchRoom(room);
   roomBroadcast(room.code, { type: 'cancel_game', room: roomSummary(room) });
 }
 
 function onStateUpdate(ws, msg) {
   const room = rooms.get(ws.roomCode);
   if (!room || room.host !== ws) return;
+  touchRoom(room);
   roomBroadcast(room.code, { type: 'state_update', state: msg.state }, ws);
 }
 
 function onAction(ws, msg) {
   const room = rooms.get(ws.roomCode);
   if (!room || room.host === ws) return;
+  touchRoom(room);
   send(room.host, { type: 'action', playerId: ws.playerId, action: msg.action });
 }
 
@@ -342,6 +379,7 @@ function onChat(ws, msg) {
   if (!room) return;
   const text = String(msg.text || '').slice(0, 200);
   if (!text.trim()) return;
+  touchRoom(room);
   const from = room.clients.get(ws);
   const line = {
     from: from ? from.name : 'Player',
@@ -353,11 +391,7 @@ function onChat(ws, msg) {
   if (room.chat.length > 100) room.chat.shift();
   roomBroadcast(room.code, {
     type: 'chat',
-    from: line.from,
-    avatar: line.avatar,
-    text: line.text,
-    ts: line.ts,
-    line
+    from: line.from, avatar: line.avatar, text: line.text, ts: line.ts, line
   });
 }
 
@@ -365,6 +399,7 @@ function onClearChat(ws) {
   const room = rooms.get(ws.roomCode);
   if (!room || room.host !== ws) return;
   room.chat = [];
+  touchRoom(room);
   const me = room.clients.get(ws);
   roomBroadcast(room.code, { type: 'chat_cleared', by: me ? me.name : 'Host' });
 }
@@ -372,6 +407,7 @@ function onClearChat(ws) {
 function onEmote(ws, msg) {
   const room = rooms.get(ws.roomCode);
   if (!room) return;
+  touchRoom(room);
   const from = room.clients.get(ws);
   roomBroadcast(room.code, {
     type: 'emote',
@@ -383,6 +419,7 @@ function onEmote(ws, msg) {
 function onTaunt(ws, msg) {
   const room = rooms.get(ws.roomCode);
   if (!room) return;
+  touchRoom(room);
   const from = room.clients.get(ws);
   const text = String(msg.text || '').slice(0, 80);
   if (!text) return;
@@ -397,6 +434,7 @@ function onTaunt(ws, msg) {
 function onRematchRequest(ws) {
   const room = rooms.get(ws.roomCode);
   if (!room || !room.host) return;
+  touchRoom(room);
   const from = room.clients.get(ws);
   send(room.host, {
     type: 'rematch_request',
@@ -411,9 +449,32 @@ function onSetBadge(ws, msg) {
   const me = room.clients.get(ws);
   if (!me) return;
   me.badgeId = (typeof msg.badgeId === 'string' && msg.badgeId)
-    ? msg.badgeId.slice(0, 32)
-    : null;
+    ? msg.badgeId.slice(0, 32) : null;
+  touchRoom(room);
   roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+function onListRooms(ws) {
+  const list = [];
+  for (const room of rooms.values()) {
+    if (!room.isPublic) continue;
+    if (room.started) continue;
+    const humans = Array.from(room.clients.values()).filter(p => !p.isBot);
+    if (!humans.length) continue;
+    if (room.clients.size >= 8) continue;
+    list.push({
+      code: room.code,
+      name: room.name,
+      universe: room.universe,
+      rules: room.rules,
+      soundPack: room.soundPack,
+      players: Array.from(room.clients.values()).map(p => ({
+        id: p.playerId, name: p.name, avatar: p.avatar
+      }))
+    });
+  }
+  list.sort((a, b) => b.players.length - a.players.length);
+  send(ws, { type: 'room_list', rooms: list.slice(0, 40) });
 }
 
 function handleClose(ws) {
@@ -422,6 +483,7 @@ function handleClose(ws) {
   const wasHost = room.host === ws;
   const info = room.clients.get(ws);
   room.clients.delete(ws);
+  touchRoom(room);
   if (wasHost) {
     roomBroadcast(room.code, { type: 'room_closed' });
     rooms.delete(room.code);
