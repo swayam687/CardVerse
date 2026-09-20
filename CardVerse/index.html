@@ -2,13 +2,27 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#12121A">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12121A" id="metaTheme">
 <title>RuleVerse</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎴</text></svg>">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('rv_theme') || 'system';
+    if (t === 'system') {
+      t = (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    }
+    document.documentElement.dataset.theme = t;
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', t === 'light' ? '#F7F7FA' : '#12121A');
+  } catch (e) {}
+})();
+</script>
 
 <link rel="stylesheet" href="css/main.css">
 <link rel="stylesheet" href="css/cards.css">
@@ -18,8 +32,26 @@
 <link rel="stylesheet" href="css/room.css">
 </head>
 <body>
-<canvas id="fx"></canvas>
+<canvas id="fx" aria-hidden="true"></canvas>
 
+<!-- Reveal overlay (bypasses modal system for reliability) -->
+<div class="reveal-overlay" id="revealOverlay" aria-hidden="true" style="display:none">
+  <div class="reveal-inner">
+    <h2 id="revealTitle">Hand revealed</h2>
+    <div class="reveal-hand" id="revealHand"></div>
+    <button class="btn primary big" id="revealClose" style="width:100%;margin-top:14px">Got it</button>
+  </div>
+</div>
+
+<div id="rotateOverlay" class="rotate-overlay" aria-hidden="true">
+  <div class="rotate-inner">
+    <div class="rotate-icon">📱</div>
+    <div class="rotate-title">Rotate your phone</div>
+    <div class="rotate-sub">RuleVerse is best played in portrait.</div>
+  </div>
+</div>
+
+<!-- HOME -->
 <section id="screen-home" class="screen active">
   <div class="home">
     <header class="home-head">
@@ -27,7 +59,7 @@
         <span class="brand-mark">🎴</span>
         <span class="brand-name">RULEVERSE</span>
       </div>
-      <button class="profile-chip" id="btnProfile">
+      <button class="profile-chip" id="btnProfile" aria-label="Edit profile">
         <span class="pc-av" id="myAvatar">🙂</span>
         <span class="pc-name" id="myName">Player</span>
       </button>
@@ -57,12 +89,9 @@
         <div class="config-cell">
           <label class="fl">Players</label>
           <select id="selPlayers">
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4" selected>4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
+            <option value="2">2</option><option value="3">3</option>
+            <option value="4" selected>4</option><option value="5">5</option>
+            <option value="6">6</option><option value="7">7</option>
             <option value="8">8</option>
           </select>
         </div>
@@ -71,14 +100,10 @@
         <div class="config-cell">
           <label class="fl">Bots</label>
           <select id="selBots">
-            <option value="0">0 (hotseat)</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3" selected>3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
+            <option value="0">0 (hotseat)</option><option value="1">1</option>
+            <option value="2">2</option><option value="3" selected>3</option>
+            <option value="4">4</option><option value="5">5</option>
+            <option value="6">6</option><option value="7">7</option>
           </select>
         </div>
         <div class="config-cell">
@@ -91,8 +116,10 @@
     <div class="home-links">
       <button class="link-btn" id="btnOpenRules">⚙ Advanced Rules</button>
       <button class="link-btn" id="btnOpenCustom">🎨 Deck Studio</button>
+      <button class="link-btn" id="btnAchievements">🏅 Achievements</button>
       <button class="link-btn" id="btnCreateRoom">🌐 Create Online Room</button>
       <button class="link-btn" id="btnJoinRoom">🔗 Join a Room</button>
+      <button class="link-btn" id="btnCommunity">💬 Community</button>
     </div>
 
     <div class="home-foot">
@@ -101,11 +128,12 @@
   </div>
 </section>
 
+<!-- ROOM -->
 <section id="screen-room" class="screen">
   <div class="room-wrap">
     <header class="room-head">
-      <button class="icon-btn" id="btnRoomBack">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      <button class="icon-btn" id="btnRoomBack" aria-label="Back to home">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </button>
       <div class="room-title">
         <h2>Online Room</h2>
@@ -118,6 +146,8 @@
       <div class="cc-code" id="roomCode">·····</div>
       <div class="cc-hint" id="codeHint">Tap to copy · share with friends</div>
     </div>
+
+    <div id="shareBox" class="share-box" style="display:none"></div>
 
     <div class="room-section">
       <div class="room-section-title">
@@ -132,9 +162,7 @@
     </div>
 
     <div class="room-section" id="roomSettings" style="display:none">
-      <div class="room-section-title">
-        <h3>Match Settings</h3>
-      </div>
+      <div class="room-section-title"><h3>Match Settings</h3></div>
       <div class="room-panel">
         <div class="settings-grid">
           <div class="settings-cell">
@@ -149,20 +177,20 @@
       </div>
     </div>
 
-       <div class="room-section">
+    <div class="room-section">
       <div class="room-section-title">
         <h3>Chat</h3>
         <button class="btn-mini" id="btnClearChat" style="display:none">Clear</button>
       </div>
       <div class="chat-panel">
-        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-log" id="chatLog" aria-live="polite"></div>
         <form class="chat-form" id="chatForm">
-          <input id="chatInput" placeholder="Say something…" maxlength="200" autocomplete="off">
+          <input id="chatInput" placeholder="Say something…" maxlength="200" autocomplete="off" aria-label="Chat message">
           <button class="btn primary" type="submit">Send</button>
         </form>
       </div>
     </div>
-    
+
     <div class="room-footer">
       <button class="btn primary big" id="btnStartMatch" style="display:none">Start Match</button>
       <div class="waiting-banner" id="waitingBanner">Waiting for the host to start…</div>
@@ -170,36 +198,35 @@
   </div>
 </section>
 
+<!-- GAME -->
 <section id="screen-game" class="screen">
   <div class="arena" id="arenaRoot">
     <header class="arena-top">
-      <button class="icon-btn" id="btnQuit">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      <button class="icon-btn" id="btnQuit" aria-label="Quit to home">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </button>
-      <div class="turn-pill" id="turnTag">YOUR TURN</div>
-      <button class="icon-btn" id="btnOpenSettings">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-        </svg>
+      <div class="turn-pill" id="turnTag" aria-live="polite">YOUR TURN</div>
+      <button class="icon-btn" id="btnOpenSettings" aria-label="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </header>
 
     <div class="opponents" id="opponents"></div>
 
     <div class="table">
-      <div class="log" id="log"></div>
+      <div class="log" id="log" aria-live="polite" aria-atomic="false"></div>
       <div class="piles">
         <div class="pile-slot">
-          <div class="deck-pile" id="deckPile">
+          <div class="deck-pile" id="deckPile" role="button" tabindex="0" aria-label="Draw a card">
             <div class="deck-back"></div>
             <div class="deck-count" id="deckCount">0</div>
           </div>
           <div class="pile-label">DRAW</div>
         </div>
-        <div class="pile-slot">
+        <div class="pile-slot" id="discardSlot">
           <div class="discard-pile" id="discardPile"></div>
           <div class="pile-label" id="activeColorLbl">—</div>
+          <div class="pending-draw-badge" id="pendingDrawBadge" style="display:none">+0</div>
         </div>
       </div>
       <div class="dir-pill" id="dirPill">↻ CW</div>
@@ -208,24 +235,46 @@
     <div class="hand-area">
       <div class="hand-meta">
         <span class="chip-count" id="myCount">🂠 7</span>
+        <span class="mode-chip" id="modeChip">Classic</span>
         <div class="hand-tools">
           <button class="chip-tool" id="btnSortHand">Sort</button>
-          <button class="chip-tool" id="btnEmote">😀</button>
+          <button class="chip-tool" id="btnEmote" aria-label="Reactions">😀</button>
+          <button class="chip-tool" id="btnTaunt" aria-label="Quick taunts">💬</button>
         </div>
       </div>
       <div class="hand-viewport">
         <div class="hand" id="hand"></div>
       </div>
-      <div class="controls">
+
+      <div class="last-card-bar" id="lastCardBar" style="display:none">
+        <button class="btn warn big" id="btnLastCard">🔥 CALL "LAST CARD!"</button>
+      </div>
+
+      <div class="controls" id="controlsRow">
         <button class="btn primary big" id="btnDraw">DRAW</button>
+        <button class="btn danger big" id="btnCatchUno" style="display:none">🚨 CATCH</button>
         <button class="btn ghost big" id="btnPass" disabled>PASS</button>
       </div>
     </div>
 
-    <div class="emote-sheet" id="emoteTray"></div>
+   <div class="emote-sheet" id="emoteTray" role="toolbar" aria-label="Reactions"></div>
+<div class="emote-sheet taunt-tray" id="tauntTray" role="toolbar" aria-label="Quick taunts"></div>
+  </div>
+
+  <div class="card-sheet" id="cardSheet" aria-hidden="true">
+    <div class="card-sheet-bg" id="cardSheetBg"></div>
+    <div class="card-sheet-panel" role="dialog" aria-modal="true" aria-label="Card details">
+      <div class="card-sheet-grab"></div>
+      <div class="card-sheet-body" id="cardSheetBody"></div>
+      <div class="card-sheet-actions">
+        <button class="btn ghost" id="cardSheetClose">Close</button>
+        <button class="btn primary" id="cardSheetPlay" disabled>Play</button>
+      </div>
+    </div>
   </div>
 </section>
 
+<!-- WIN -->
 <section id="screen-win" class="screen">
   <div class="win-wrap">
     <div class="win-panel">
@@ -245,6 +294,7 @@
   <div class="modal" id="modal"></div>
 </div>
 
+<script src="js/core/util.js"></script>
 <script src="js/core/Card.js"></script>
 <script src="js/core/Deck.js"></script>
 <script src="js/core/Player.js"></script>
@@ -267,6 +317,8 @@
 
 <script src="js/ui/CardRenderer.js"></script>
 <script src="js/ui/Emotes.js"></script>
+<script src="js/ui/Taunts.js"></script>
+<script src="js/ui/ShareRoom.js"></script>
 <script src="js/ui/Settings.js"></script>
 <script src="js/ui/Tutorial.js"></script>
 <script src="js/ui/PrivacyScreen.js"></script>

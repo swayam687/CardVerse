@@ -1,26 +1,123 @@
 /* ============================================================
-   ui/Modal.js — Pulse
+   ui/Modal.js — Pulse v2.9
+   FIX: all pickers now correctly return the picked value.
+   Bug: close() fired onClose(=finish(null)) BEFORE the pick
+   callback, so picked items were treated as cancels. The card
+   list for Mandarin/Orochimaru never opened because the chain
+   aborted right after the player was picked.
+   Now: item click suppresses onClose, closes, THEN finishes.
    ============================================================ */
 const Modal = {
   _isOpen: false,
+  _forceChoice: false,
+  _tabHandler: null,
+  _returnFocus: null,
+  _closeCb: null,
 
-  open(html, { onClose = null } = {}) {
+  open(html, { onClose = null, forceChoice = false } = {}) {
     const bg = document.getElementById('modalBg');
     const m = document.getElementById('modal');
+    if (!bg || !m) return null;
+
+    this._returnFocus = document.activeElement;
+    this._closeCb = (typeof onClose === 'function') ? onClose : null;
+
     m.innerHTML = html;
     bg.classList.add('on');
     this._isOpen = true;
-    bg.onclick = e => { if (e.target === bg) this.close(onClose); };
+    this._forceChoice = !!forceChoice;
+    if (this._forceChoice) bg.classList.add('no-dismiss');
+    else bg.classList.remove('no-dismiss');
+
+    bg.onclick = e => {
+      if (e.target !== bg) return;
+      if (this._forceChoice) return;
+      this.close();
+    };
+
+    const focusable = m.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length) focusable[0].focus();
+
+    this._removeTabHandler();
+    this._tabHandler = (e) => {
+      if (e.key === 'Escape') {
+        if (!this._forceChoice) this.close();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const f = Array.from(m.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )).filter(el => !el.disabled && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', this._tabHandler);
+
     return m;
   },
 
-  close(cb) {
-    document.getElementById('modalBg').classList.remove('on');
-    this._isOpen = false;
-    if (typeof cb === 'function') cb();
+  _removeTabHandler() {
+    if (this._tabHandler) {
+      document.removeEventListener('keydown', this._tabHandler);
+      this._tabHandler = null;
+    }
   },
 
-  colorPick(onPick, onCancel) {
+  close() {
+    if (this._forceChoice) return;
+
+    const bg = document.getElementById('modalBg');
+    if (bg) {
+      bg.classList.remove('on');
+      bg.classList.remove('no-dismiss');
+      bg.onclick = null;
+    }
+    const wasOpen = this._isOpen;
+    this._isOpen = false;
+    this._removeTabHandler();
+
+    if (this._returnFocus && typeof this._returnFocus.focus === 'function') {
+      try { this._returnFocus.focus(); } catch (e) {}
+    }
+    this._returnFocus = null;
+
+    const cb = this._closeCb;
+    this._closeCb = null;
+    this._forceChoice = false;
+
+    if (wasOpen && typeof cb === 'function') {
+      try { cb(); } catch (e) { console.error('[modal] close cb error', e); }
+    }
+  },
+
+  /**
+   * Commit a picked value:
+   *  1. Suppress onClose so close() does NOT fire finish(null).
+   *  2. Close the modal (cleans up state, restores focus).
+   *  3. Fire finish(value) — triggers the next step of the chain.
+   */
+  _commit(value, finish) {
+    this._closeCb = null;
+    this.close();
+    if (typeof Sound !== 'undefined') Sound.click();
+    finish(value);
+  },
+
+  /* ── Single-callback pickers ─────────────────────────── */
+
+  colorPick(onResult) {
+    if (typeof onResult !== 'function') return;
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      onResult(val);
+    };
+
     const m = this.open(`
       <h2>Choose a Color</h2>
       <div class="hint">Your wild card takes on this color.</div>
@@ -30,16 +127,111 @@ const Modal = {
         <button class="cp" data-c="green"><span class="cp-dot"></span>Green</button>
         <button class="cp" data-c="yellow"><span class="cp-dot"></span>Yellow</button>
       </div>
-    `);
+      <button class="btn ghost big" id="cpCancel"
+              style="width:100%;margin-top:14px">Cancel</button>
+    `, { onClose: () => finish(null) });
+
+    if (!m) { finish(null); return; }
+
     m.querySelectorAll('.cp').forEach(el => {
-      el.onclick = () => { Sound.click(); this.close(); onPick(el.dataset.c); };
+      el.onclick = () => {
+        const color = el.dataset.c;
+        this._commit(color, finish);
+      };
     });
-    document.getElementById('modalBg').onclick = e => {
-      if (e.target === document.getElementById('modalBg')) {
-        this.close();
-        onCancel && onCancel();
-      }
+    m.querySelector('#cpCancel').onclick = () => this.close();
+  },
+
+  pickPlayer(state, excludeIdx, onResult) {
+    if (typeof onResult !== 'function') return;
+    if (!state || !Array.isArray(state.players)) { onResult(null); return; }
+
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      onResult(val);
     };
+
+    const m = this.open(`
+      <h2>Choose a Player</h2>
+      <div class="hint">This ability targets any player you pick.</div>
+      <div class="player-pick-grid" id="playerPickGrid"></div>
+      <button class="btn ghost big" style="width:100%;margin-top:14px" id="ppCancel">Cancel</button>
+    `, { onClose: () => finish(null) });
+
+    if (!m) { finish(null); return; }
+
+    const grid = m.querySelector('#playerPickGrid');
+    if (!grid) { this.close(); finish(null); return; }
+
+    state.players.forEach((p, i) => {
+      if (i === excludeIdx) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'player-pick-btn';
+      btn.innerHTML = `
+        <span class="pp-av">${esc(p.avatar || '🙂')}</span>
+        <span class="pp-name">${esc(p.name)}</span>
+        <span class="pp-cnt">${p.hand.length} card${p.hand.length === 1 ? '' : 's'}</span>
+      `;
+      btn.onclick = () => this._commit(i, finish);
+      grid.appendChild(btn);
+    });
+
+    m.querySelector('#ppCancel').onclick = () => this.close();
+  },
+
+  pickCardFrom(player, onResult) {
+    if (typeof onResult !== 'function') return;
+    if (!player || !Array.isArray(player.hand)) { onResult(null); return; }
+
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      onResult(val);
+    };
+
+    const m = this.open(`
+      <h2>Pick a Card</h2>
+      <div class="hint">Tap one card from ${esc(player.avatar)} ${esc(player.name)}'s hand.</div>
+      <div class="card-pick-grid" id="cardPickGrid"></div>
+      <button class="btn ghost big" style="width:100%;margin-top:14px" id="cpCancel">Cancel</button>
+    `, { onClose: () => finish(null) });
+
+    if (!m) { finish(null); return; }
+
+    const grid = m.querySelector('#cardPickGrid');
+    if (!grid) { this.close(); finish(null); return; }
+
+    if (!player.hand.length) {
+      grid.innerHTML = '<p style="opacity:.7;margin:8px 0">No cards in hand.</p>';
+    }
+
+    player.hand.forEach(card => {
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      wrap.className = 'card-pick-btn';
+      wrap.setAttribute('aria-label', `Take ${card.name}`);
+      wrap.style.cssText = 'background:transparent;border:0;padding:0;margin:0;cursor:pointer;pointer-events:auto;';
+
+      const cardEl = CardRenderer.build(card, { small: true });
+      cardEl.style.pointerEvents = 'none';
+      wrap.appendChild(cardEl);
+
+      wrap.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[RV] card picked:', card.name, card.uid);
+        const uid = card.uid;
+        this._commit(uid, finish);
+      };
+
+      grid.appendChild(wrap);
+    });
+
+    m.querySelector('#cpCancel').onclick = () => this.close();
   },
 
   revealHand(player, cards, onClose) {
@@ -48,14 +240,16 @@ const Modal = {
       <div class="hint">${cards.length} card${cards.length !== 1 ? 's' : ''} revealed.</div>
       <div class="reveal-hand" id="revealHand"></div>
       <button class="btn primary big" style="width:100%;margin-top:20px" id="closeReveal">Got it</button>
-    `);
+    `, { onClose });
+    if (!m) return;
     const wrap = m.querySelector('#revealHand');
     cards.forEach(c => wrap.appendChild(CardRenderer.build(c, { small: true })));
-    m.querySelector('#closeReveal').onclick = () => this.close(onClose);
-    const t = setTimeout(() => {
-      if (document.getElementById('modalBg').classList.contains('on')) this.close(onClose);
+    m.querySelector('#closeReveal').onclick = () => this.close();
+
+    setTimeout(() => {
+      const bg = document.getElementById('modalBg');
+      if (bg && bg.classList.contains('on') && !this._forceChoice) this.close();
     }, 6000);
-    document.getElementById('modalBg').addEventListener('click', () => clearTimeout(t), { once: true });
   },
 
   customDeck(onLoad) {
@@ -90,7 +284,7 @@ const Modal = {
       <div class="hint">
         Define a universe as JSON. Effect types:
         <code>DRAW · SKIP · REVERSE · EXTRA_TURN · DISCARD · SWAP_HANDS · REVEAL · SHIELD · IMMUNE · COPY · STEAL</code>.
-        Targets: <code>self · next · prev · all · others</code>.
+        Targets: <code>self · next · prev · all · others · choose</code>.
       </div>
       <textarea id="deckJson" spellcheck="false">${esc(JSON.stringify(sample, null, 2))}</textarea>
       <div class="row" style="margin-top:16px">
@@ -99,6 +293,7 @@ const Modal = {
       </div>
       <div class="hint" id="deckErr" style="color:var(--danger);margin-top:12px;display:none;font-weight:800"></div>
     `);
+    if (!m) return;
 
     m.querySelector('#cancelDeck').onclick = () => this.close();
     m.querySelector('#loadDeck').onclick = () => {

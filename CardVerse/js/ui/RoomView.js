@@ -4,9 +4,18 @@
    Multiplayer lobby. Host controls settings + start.
    Everyone sees the player list and chat.
    Host can clear the chat for all players.
+
+   Fixes applied:
+     · chat render tolerates {name} and {from}
+     · player_left tolerates {id} and {playerId}
+     · universe/rules selectors tolerate old and new server field names
+     · player avatars escaped (XSS fix)
+     · rejoin mid-game uses top-level msg.state
+     · start button disabled during start
    ============================================================ */
 const RoomView = {
   _bound: false,
+  _starting: false,
 
   init() {
     if (this._bound) return;
@@ -19,11 +28,11 @@ const RoomView = {
     };
 
     document.getElementById('codeCard').onclick = () => {
-      const code = Net.room?.code || '';
+      const code = (Net.room && Net.room.code) || '';
       if (!code) return;
-      try { navigator.clipboard.writeText(code); } catch(e){}
+      try { navigator.clipboard.writeText(code); } catch (e) {}
       Toast.show('Code copied');
-      Haptics.tap();
+      if (typeof Haptics !== 'undefined') Haptics.tap();
     };
 
     document.getElementById('btnAddBot').onclick = () => {
@@ -32,8 +41,18 @@ const RoomView = {
     };
 
     document.getElementById('btnStartMatch').onclick = () => {
+      if (this._starting) return;
+      this._starting = true;
+      const btn = document.getElementById('btnStartMatch');
+      if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
       Sound.click();
-      GameFlow.startMultiplayer();
+      try { GameFlow.startMultiplayer(); }
+      finally {
+        setTimeout(() => {
+          this._starting = false;
+          if (btn) { btn.disabled = false; btn.textContent = 'Start Match'; }
+        }, 1200);
+      }
     };
 
     document.getElementById('chatForm').onsubmit = e => {
@@ -45,12 +64,12 @@ const RoomView = {
       inp.value = '';
     };
 
-    // Host-only: clear chat for everyone
     document.getElementById('btnClearChat').onclick = () => {
       Sound.click();
       Net.clearChat();
     };
 
+    // Populate universe + rules dropdowns once.
     const ru = document.getElementById('roomUniverse');
     Object.values(UNIVERSES).forEach(u => {
       const o = document.createElement('option');
@@ -60,7 +79,10 @@ const RoomView = {
     });
     ru.onchange = () => {
       const u = UNIVERSES[ru.value];
+      if (!u) return;
+      // Send both field naming conventions so it works with either server.
       Net.updateRoom({
+        universe: u.id,
         universeId: u.id,
         universeName: `${u.icon} ${u.name}`,
         customDef: null
@@ -75,11 +97,11 @@ const RoomView = {
       rr.appendChild(o);
     });
     rr.onchange = () => {
-      Net.updateRoom({ rulesKey: rr.value });
+      Net.updateRoom({ rules: rr.value, rulesKey: rr.value });
     };
   },
 
-  // ────────────────────── Net event handlers ──────────────────────
+  /* ── Net event handlers ────────────────────────────────── */
 
   onCreated() {
     this._resetChatLog();
@@ -93,43 +115,60 @@ const RoomView = {
 
   onRejoined(msg) {
     this.render();
-    if (msg.room.started && msg.room.state) {
-      if (ArenaView.state) {
-        GameFlow.applyStateUpdate(msg.room.state);
-      } else {
-        GameFlow.enterMultiplayerGame(msg.room.state, msg.room.rulesKey);
-      }
+    // Server may attach state at the top level (my server) or under msg.room.
+    const state = msg.state || (msg.room && msg.room.state) || null;
+    const rulesKey = msg.rulesKey || (msg.room && msg.room.rulesKey) || 'classic';
+    if (state) {
+      if (ArenaView.state) GameFlow.applyStateUpdate(state);
+      else GameFlow.enterMultiplayerGame(state, rulesKey);
     }
   },
 
   onRoomUpdate(msg) {
     this.render();
-    // If the host cancelled the match, drop back to the room
-    if (!msg.room.started && ArenaView.state) {
+    if (!msg.room) return;
+
+    // Host cancelled the match → drop everyone back to the room.
+    if (msg.room.started === false && ArenaView.state) {
       this._teardownGame();
       show('screen-room');
       Toast.show('Match ended');
       return;
     }
+    // Host started a match and state is embedded.
     if (msg.room.started && msg.room.state && !ArenaView.state) {
       GameFlow.enterMultiplayerGame(msg.room.state, msg.room.rulesKey);
     }
   },
 
-  onChat(msg) {
+    onChat(msg) {
     const log = document.getElementById('chatLog');
     if (!log) return;
+
+    // Server may nest payload under msg.line, or send flat fields.
+    // Accept both shapes so a server update can't break this.
+    const data = msg.line || msg;
+
     const line = document.createElement('div');
-    if (msg.system) {
+
+    if (msg.system || data.system) {
       line.className = 'chat-line system';
-      line.textContent = msg.text;
+      line.textContent = data.text || '';
     } else {
       line.className = 'chat-line';
-      line.innerHTML = `<span class="who">${esc(msg.name)}:</span><span class="txt">${esc(msg.text)}</span>`;
+      const who = data.name || data.from || 'Player';
+      const av  = data.avatar || '🙂';
+      const txt = data.text || '';
+      line.innerHTML =
+        `<span class="chat-av">${esc(av)}</span>` +
+        `<span class="who">${esc(who)}:</span>` +
+        `<span class="txt">${esc(txt)}</span>`;
     }
     log.appendChild(line);
     log.scrollTop = log.scrollHeight;
-    if (msg.from !== Net.playerId) Haptics.tap();
+
+    const fromId = data.from || data.playerId;
+    if (fromId && fromId !== Net.playerId && typeof Haptics !== 'undefined') Haptics.tap();
   },
 
   onChatCleared(msg) {
@@ -138,26 +177,28 @@ const RoomView = {
     log.innerHTML = '';
     const line = document.createElement('div');
     line.className = 'chat-line system';
-    line.textContent = msg.by ? `${msg.by} cleared the chat` : 'Chat cleared';
+    line.textContent = (msg && msg.by) ? `${msg.by} cleared the chat` : 'Chat cleared';
     log.appendChild(line);
   },
 
   onEmote(msg) {
     const el = document.createElement('div');
     el.className = 'emoji-float';
-    el.textContent = msg.emoji;
+    el.textContent = msg.emoji || '';
     el.style.left = (10 + Math.random() * 80) + '%';
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 1700);
   },
 
-  // Host takes over the disconnected player's seat with a bot
   onPlayerLeft(msg) {
+    const id = msg.playerId || msg.id;
+    const name = msg.name || 'A player';
+
     const log = document.getElementById('chatLog');
     if (log) {
       const line = document.createElement('div');
       line.className = 'chat-line system';
-      line.textContent = `${msg.name} left`;
+      line.textContent = `${name} left`;
       log.appendChild(line);
       log.scrollTop = log.scrollHeight;
     }
@@ -166,12 +207,12 @@ const RoomView = {
     const s = ArenaView.state;
     if (!s || s.winner !== null) return;
 
-    const idx = s.players.findIndex(p => p.id === msg.id);
+    const idx = s.players.findIndex(p => p.id === id);
     if (idx === -1 || s.players[idx].isBot) return;
 
     s.players[idx].isBot = true;
     s.players[idx].name += ' (AI)';
-    GameEngine.log(`${s.players[idx].name} disconnected — bot took over`, 'hot');
+    GameEngine.log(`${esc(s.players[idx].name)} disconnected — bot took over`, 'hot');
     ArenaView.render();
 
     if (s.turn === idx) {
@@ -186,7 +227,7 @@ const RoomView = {
   },
 
   onRoomClosed(msg) {
-    Toast.show(msg.reason || 'Room closed');
+    Toast.show((msg && msg.reason) || 'Room closed');
     this._teardownGame();
     Net.active = false;
     Net.isHost = false;
@@ -195,7 +236,7 @@ const RoomView = {
   },
 
   onKicked(msg) {
-    Toast.show(msg.reason || 'Removed from room');
+    Toast.show((msg && msg.reason) || 'Removed from room');
     this._teardownGame();
     Net.active = false;
     Net.isHost = false;
@@ -204,11 +245,11 @@ const RoomView = {
   },
 
   onError(msg) {
-    Toast.show(msg.reason || 'Something went wrong');
+    Toast.show((msg && (msg.reason || msg.message)) || 'Something went wrong');
     Sound.bad();
   },
 
-  // ────────────────────── Helpers ──────────────────────
+  /* ── Helpers ──────────────────────────────────────────── */
 
   _resetChatLog() {
     const log = document.getElementById('chatLog');
@@ -220,43 +261,44 @@ const RoomView = {
     if (GameEngine._botTimer) { clearTimeout(GameEngine._botTimer); GameEngine._botTimer = null; }
     ArenaView.state = null;
     ArenaView._cardPool = null;
-    PrivacyScreen.hide();
+    if (typeof PrivacyScreen !== 'undefined') PrivacyScreen.hide();
     ['hand', 'opponents', 'log', 'discardPile'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = '';
     });
   },
 
-  // ────────────────────── Rendering ──────────────────────
+  /* ── Rendering ────────────────────────────────────────── */
 
   render() {
     const room = Net.room;
     if (!room) return;
 
-    document.getElementById('roomCode').textContent = room.code;
+    document.getElementById('roomCode').textContent = room.code || '·····';
 
-    // Show Clear button only for the host
     const clearBtn = document.getElementById('btnClearChat');
     if (clearBtn) clearBtn.style.display = Net.isHost ? '' : 'none';
 
-    const onlineCount = room.players.filter(p => p.connected).length;
-    document.getElementById('roomCount').textContent = `${room.players.length}/8`;
+    const players = room.players || [];
+    const onlineCount = players.filter(p => p.connected).length;
+    document.getElementById('roomCount').textContent = `${players.length}/8`;
     document.getElementById('roomStatusLine').textContent =
       Net.isHost ? `You're the host · ${onlineCount} online`
                  : `Waiting for host · ${onlineCount} online`;
 
     const list = document.getElementById('playerList');
     list.innerHTML = '';
-    room.players.forEach(p => {
-      const isHost = p.id === room.hostId;
+    players.forEach(p => {
+      const isHost = (p.id === room.hostId) ||
+                     (Array.isArray(players) && p.isHost === true);
       const isMe = p.id === Net.playerId;
       const row = document.createElement('div');
       row.className = 'player-row' + (!p.connected && !p.isBot ? ' disconnected' : '');
       row.innerHTML = `
-        <div class="player-av">${p.avatar}</div>
+        <div class="player-av">${esc(p.avatar || '🙂')}</div>
         <div class="player-info">
           <div class="player-name">
-            ${esc(p.name)}${isMe ? ' <span style="color:var(--text-tertiary);font-size:11px">(you)</span>' : ''}
+            ${esc(p.name || 'Player')}${isMe ? ' <span style="color:var(--text-tertiary);font-size:11px">(you)</span>' : ''}
             ${isHost ? '<span class="crown">Host</span>' : ''}
           </div>
           <div class="player-meta">${p.isBot ? 'Bot' : (p.connected ? 'Ready' : 'Disconnected')}</div>
@@ -279,28 +321,30 @@ const RoomView = {
     });
 
     const addBotRow = document.getElementById('addBotRow');
-    addBotRow.style.display = (Net.isHost && room.players.length < 8) ? '' : 'none';
+    if (addBotRow) addBotRow.style.display =
+      (Net.isHost && players.length < 8) ? '' : 'none';
 
     const settings = document.getElementById('roomSettings');
-    settings.style.display = Net.isHost ? '' : 'none';
+    if (settings) settings.style.display = Net.isHost ? '' : 'none';
     if (Net.isHost) {
       const ru = document.getElementById('roomUniverse');
       const rr = document.getElementById('roomRules');
-      if (ru.value !== room.universeId) ru.value = room.universeId;
-      if (rr.value !== room.rulesKey) rr.value = room.rulesKey;
+      // Accept both field names.
+      const uniKey = room.universe || room.universeId;
+      const rulesKey = room.rules || room.rulesKey;
+      if (uniKey && ru.value !== uniKey) ru.value = uniKey;
+      if (rulesKey && rr.value !== rulesKey) rr.value = rulesKey;
     }
 
     const startBtn = document.getElementById('btnStartMatch');
     const waiting = document.getElementById('waitingBanner');
-    const canStart = Net.isHost && room.players.length >= 2;
-    startBtn.style.display = canStart ? '' : 'none';
-    waiting.style.display = (!Net.isHost || !canStart) ? '' : 'none';
-    if (!Net.isHost) {
-      waiting.textContent = 'Waiting for the host to start…';
-    } else if (room.players.length < 2) {
-      waiting.textContent = 'Need at least 2 players to start.';
-    } else {
-      waiting.textContent = '';
+    const canStart = Net.isHost && players.length >= 2;
+    if (startBtn) startBtn.style.display = canStart ? '' : 'none';
+    if (waiting) {
+      waiting.style.display = (!Net.isHost || !canStart) ? '' : 'none';
+      if (!Net.isHost) waiting.textContent = 'Waiting for the host to start…';
+      else if (players.length < 2) waiting.textContent = 'Need at least 2 players to start.';
+      else waiting.textContent = '';
     }
   }
 };

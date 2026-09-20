@@ -1,5 +1,7 @@
 /* ============================================================
-   data/rules.js — the rule CONFIG SCHEMA
+   data/rules.js — the rule CONFIG SCHEMA + defaults
+   v2.11: adds stacking.anyColor (stack +2 on +2 regardless
+          of color — No Mercy rule).
    ============================================================ */
 const RULE_SCHEMA = [
   {
@@ -18,7 +20,9 @@ const RULE_SCHEMA = [
       { key: 'draw2OnDraw2', label: '+2 on +2', type: 'bool', def: true },
       { key: 'draw4OnDraw2', label: '+4 on +2', type: 'bool', def: false },
       { key: 'draw4OnDraw4', label: '+4 on +4', type: 'bool', def: false },
-      { key: 'draw2OnDraw4', label: '+2 on +4', type: 'bool', def: false }
+      { key: 'draw2OnDraw4', label: '+2 on +4', type: 'bool', def: false },
+      { key: 'anyColor',     label: 'Stack Any Color', type: 'bool', def: false,
+        note: 'No Mercy: +2 stacks onto +2 even when colors differ' }
     ]
   },
   {
@@ -47,17 +51,48 @@ const RULE_SCHEMA = [
   {
     group: 'Table', key: 'deal', icon: '🎲',
     items: [
-      { key: 'handSize', label: 'Starting Hand', type: 'num', def: 7, min: 3, max: 12 },
-      { key: 'reshuffle', label: 'Reshuffle Discard', type: 'bool', def: true }
+      { key: 'handSize',  label: 'Starting Hand',      type: 'num', def: 7, min: 3, max: 20 },
+      { key: 'reshuffle', label: 'Reshuffle Discard',  type: 'bool', def: true },
+      { key: 'deckMode',  label: 'Deck Mode', type: 'str', def: 'normal', hidden: true }
     ]
   }
 ];
 
 function defaultRules() {
-  const r = {};
-  for (const g of RULE_SCHEMA) {
-    r[g.key] = {};
-    for (const it of g.items) r[g.key][it.key] = it.def;
+  const out = {};
+  for (const group of RULE_SCHEMA) {
+    const g = {};
+    for (const item of group.items) {
+      g[item.key] = (item.def !== undefined) ? item.def : 0;
+    }
+    out[group.key] = g;
   }
-  return r;
+  return out;
+}
+
+function sanitizeRules(r) {
+  const src = (r && typeof r === 'object') ? r : {};
+
+  const out = {
+    matching:  { ...(src.matching  || {}) },
+    stacking:  { ...(src.stacking  || {}) },
+    turn:      { ...(src.turn      || {}) },
+    draw:      { ...(src.draw      || {}) },
+    abilities: { ...(src.abilities || {}) },
+    deal:      { ...(src.deal      || {}) }
+  };
+
+  const num = (v, lo, hi, dflt) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return dflt;
+    return Math.max(lo, Math.min(hi, n));
+  };
+
+  out.deal.handSize = num(out.deal.handSize, 3, 20, 7);
+  out.draw.count    = num(out.draw.count,    1, 5,  1);
+  out.turn.timer    = num(out.turn.timer,    0, 120, 0);
+
+  if (out.deal.deckMode !== 'allWild') out.deal.deckMode = 'normal';
+
+  return out;
 }

@@ -1,6 +1,9 @@
 /* ============================================================
-   core/GameState.js
+   js/core/GameState.js
    ============================================================ */
+
+const LOG_MAX = 40; // keep broadcast state small
+
 function makeGameState({ players, universeId, universeName, rules }) {
   return {
     players,
@@ -20,6 +23,10 @@ function makeGameState({ players, universeId, universeName, rules }) {
     turnStart: Date.now(),
     reveal: null,
     turnCount: 0,
-    startedAt: Date.now()
+    startedAt: Date.now(),
+    // NEW: LAST CARD tracking. Index-aligned with players.
+    // false → player must still press "CALL LAST CARD!" before winning.
+    // Bots auto-set this to true when they land on exactly 1 card.
+    lastCardCalled: players.map(() => false)
   };
 }

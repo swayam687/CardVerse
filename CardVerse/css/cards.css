@@ -1,6 +1,5 @@
 /* ============================================================
    RuleVerse — cards.css (Pulse)
-   Card face: big number, character name, ability pill.
    ============================================================ */
 
 .card {
@@ -13,6 +12,7 @@
   transition: transform .22s cubic-bezier(.2,.9,.3,1.3);
   user-select: none;
   -webkit-user-select: none;
+  contain: layout style paint;
 }
 @media (min-width: 560px) {
   .card { width: 88px; height: 124px; }
@@ -82,21 +82,14 @@ html[data-theme="light"] .card-face {
   transform: rotate(-12deg);
 }
 
-/* ---- color fills (inlined so they never depend on main.css vars) ---- */
 .card[data-color="red"]    { --c-fill: #E63946; --c-text: #ffffff; }
 .card[data-color="blue"]   { --c-fill: #3A7BD5; --c-text: #ffffff; }
 .card[data-color="green"]  { --c-fill: #2A9D8F; --c-text: #ffffff; }
 .card[data-color="yellow"] { --c-fill: #E9C46A; --c-text: #2A1F0A; }
 .card[data-color="wild"]   { --c-fill: #9B5DE5; --c-text: #ffffff; }
 
-/* Wild cards get a rainbow border, purple inner fill */
 .card[data-color="wild"] .card-front {
-  background: conic-gradient(from 210deg,
-    #E63946 0deg,
-    #E9C46A 90deg,
-    #2A9D8F 180deg,
-    #3A7BD5 270deg,
-    #E63946 360deg);
+  background: conic-gradient(from 210deg, #E63946 0deg, #E9C46A 90deg, #2A9D8F 180deg, #3A7BD5 270deg, #E63946 360deg);
 }
 .card[data-color="wild"] .card-front::before {
   content: '';
@@ -108,7 +101,6 @@ html[data-theme="light"] .card-face {
 }
 .card[data-color="wild"] .card-front > * { position: relative; z-index: 2; }
 
-/* ---- corner shapes (only shown in colorblind mode) ---- */
 .c-shape {
   position: absolute;
   font-family: var(--font, 'Nunito Sans', sans-serif);
@@ -122,7 +114,6 @@ html[data-theme="light"] .card-face {
 .c-shape.tl { top: 8px; left: 9px; }
 .c-shape.br { bottom: 8px; right: 9px; transform: rotate(180deg); }
 
-/* ---- center display: number or effect icon ---- */
 .c-center {
   flex: 1;
   display: flex;
@@ -140,18 +131,10 @@ html[data-theme="light"] .card-face {
 }
 @media (min-width: 560px) { .c-center { font-size: 40px; } }
 .card[data-color="yellow"] .c-center { text-shadow: 0 1px 2px rgba(255,255,255,.3); }
-
 .c-center.is-icon { font-size: 26px; letter-spacing: 0; }
 @media (min-width: 560px) { .c-center.is-icon { font-size: 30px; } }
 
-/* ---- bottom: character name + ability pill ---- */
-.c-bottom {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: center;
-  min-height: 0;
-}
+.c-bottom { display: flex; flex-direction: column; gap: 3px; align-items: center; min-height: 0; }
 
 .c-name {
   font-family: var(--font, 'Nunito Sans', sans-serif);
@@ -186,7 +169,6 @@ html[data-theme="light"] .card-face {
 .card[data-color="yellow"] .c-pill { background: rgba(0,0,0,.12); color: #2A1F0A; }
 .c-pill.locked { background: rgba(230,57,70,.85); color: #ffffff; }
 
-/* ---- small variant (reveal modal) ---- */
 .card.small { width: 48px; height: 68px; border-radius: 8px; }
 .card.small .card-front { padding: 4px 5px; }
 .card.small .c-center { font-size: 22px; }
@@ -196,7 +178,6 @@ html[data-theme="light"] .card-face {
 .card.small .c-shape.tl { top: 4px; left: 5px; }
 .card.small .c-shape.br { bottom: 4px; right: 5px; }
 
-/* ---- tiny variant (opponent stacks) ---- */
 .card.tiny { width: 30px; height: 42px; border-radius: 6px; }
 .card.tiny .card-front { padding: 0; }
 .card.tiny .c-center { font-size: 14px; }
@@ -204,7 +185,6 @@ html[data-theme="light"] .card-face {
 .card.tiny .c-pill,
 .card.tiny .c-shape { display: none; }
 
-/* ---- hover / playable states (used by ArenaView) ---- */
 .hand .card.playable { cursor: pointer; }
 .hand .card.playable:hover {
   transform: translateY(-24px) rotateX(10deg) scale(1.06);
@@ -223,42 +203,30 @@ html[data-theme="light"] .card-face {
   0%, 100% { opacity: .55; }
   50%      { opacity: 1; }
 }
-.hand .card.dim {
-  filter: brightness(.5) saturate(.5);
-  cursor: not-allowed;
-}
-.hand .card.dealing {
-  animation: dealIn .42s cubic-bezier(.2,.9,.3,1.15) backwards;
-}
+.hand .card.dim { filter: brightness(.5) saturate(.5); cursor: not-allowed; }
+.hand .card.dealing { animation: dealIn .42s cubic-bezier(.2,.9,.3,1.15) backwards; }
 @keyframes dealIn {
   from { opacity: 0; transform: translate(0,-180px) rotate(-32deg) scale(.5); }
   to   { opacity: 1; transform: none; }
 }
 
-/* ---- colorblind patterns ---- */
+/* Card type tint (colorblind support shapes remain in main.css/toggles) */
 html.cb-mode .card[data-color="red"] .card-front::after {
-  background:
-    radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%),
-    repeating-linear-gradient(45deg, transparent 0 6px, rgba(0,0,0,.14) 6px 8px);
+  background: radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%), repeating-linear-gradient(45deg, transparent 0 6px, rgba(0,0,0,.14) 6px 8px);
 }
 html.cb-mode .card[data-color="blue"] .card-front::after {
-  background:
-    radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%),
-    repeating-linear-gradient(-45deg, transparent 0 6px, rgba(255,255,255,.18) 6px 8px);
+  background: radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%), repeating-linear-gradient(-45deg, transparent 0 6px, rgba(255,255,255,.18) 6px 8px);
 }
 html.cb-mode .card[data-color="green"] .card-front::after {
-  background:
-    radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%),
-    radial-gradient(circle, rgba(0,0,0,.18) 1.2px, transparent 1.4px);
+  background: radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%), radial-gradient(circle, rgba(0,0,0,.18) 1.2px, transparent 1.4px);
   background-size: auto, 10px 10px;
 }
 html.cb-mode .card[data-color="yellow"] .card-front::after {
-  background:
-    radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%),
-    repeating-linear-gradient(0deg, transparent 0 4px, rgba(0,0,0,.1) 4px 5px);
+  background: radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.22), transparent 60%), repeating-linear-gradient(0deg, transparent 0 4px, rgba(0,0,0,.1) 4px 5px);
 }
 
-/* ---- tooltip ---- */
+/* Legacy hover tooltip — kept for desktop.
+   On mobile, use the .card-sheet bottom sheet instead. */
 .card-tooltip {
   position: fixed;
   transform: translateY(-100%);
@@ -273,5 +241,74 @@ html.cb-mode .card[data-color="yellow"] .card-front::after {
   box-shadow: 0 20px 50px -12px rgba(0,0,0,.8);
   pointer-events: none;
   font-weight: 700;
-  max-width: 260px;
+  max-width: min(260px, calc(100vw - 32px));
+}
+html[data-theme="light"] .card-tooltip {
+  background: #FFFFFF;
+  color: #1A1A24;
+  border-color: #E63D5C;
+}
+
+/* ─── Mobile card detail sheet ───────────────────────────── */
+.card-sheet { position: fixed; inset: 0; z-index: 9500; display: none; }
+.card-sheet.open { display: block; }
+.card-sheet-bg {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: csBg .18s ease;
+}
+@keyframes csBg { from { opacity: 0; } to { opacity: 1; } }
+
+.card-sheet-panel {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  background: var(--bg-elevated, #1C1C28);
+  color: var(--text-primary, #F5F5FA);
+  border-radius: 20px 20px 0 0;
+  padding: 8px 20px calc(20px + var(--safe-bottom, 0px));
+  box-shadow: 0 -20px 50px -12px rgba(0,0,0,.7);
+  animation: csUp .24s cubic-bezier(.2,.9,.3,1);
+  max-height: 80dvh;
+  overflow-y: auto;
+}
+@keyframes csUp { from { transform: translateY(100%); } to { transform: none; } }
+.card-sheet-grab {
+  width: 40px; height: 4px;
+  border-radius: 4px;
+  background: var(--border-strong, #3A3A4C);
+  margin: 6px auto 12px;
+}
+.card-sheet-body { font-size: 14px; line-height: 1.5; }
+.card-sheet-body h3 { margin: 0 0 6px; font-size: 20px; font-weight: 900; }
+.card-sheet-body .cs-meta {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px;
+}
+.card-sheet-body .cs-chip {
+  background: var(--bg-surface-2, #262634);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+.card-sheet-body .cs-chip[data-color="red"]    { background: #E63946; color: #fff; }
+.card-sheet-body .cs-chip[data-color="blue"]   { background: #3A7BD5; color: #fff; }
+.card-sheet-body .cs-chip[data-color="green"]  { background: #2A9D8F; color: #fff; }
+.card-sheet-body .cs-chip[data-color="yellow"] { background: #E9C46A; color: #2A1F0A; }
+.card-sheet-body .cs-chip[data-color="wild"]   { background: #9B5DE5; color: #fff; }
+.card-sheet-body .cs-effects { margin: 0; padding-left: 18px; }
+.card-sheet-body .cs-effects li { margin-bottom: 4px; }
+.card-sheet-body .cs-warn { color: #FF4D6D; font-weight: 800; margin-top: 10px; }
+
+.card-sheet-actions {
+  display: flex; gap: 12px; margin-top: 18px;
+}
+.card-sheet-actions .btn { flex: 1; }
+
+/* Disable hover-only transforms on touch devices */
+@media (hover: none) {
+  .hand .card.playable:hover { transform: none; }
 }

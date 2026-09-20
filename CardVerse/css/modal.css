@@ -25,6 +25,7 @@
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--r-xl) var(--r-xl) 0 0;
+  padding-bottom: calc(20px + var(--safe-bottom));
   padding: var(--s-5) var(--s-4) calc(var(--s-5) + var(--safe-bottom));
   width: 100%;
   max-height: 88vh;
@@ -230,3 +231,8 @@
   min-height: 40px;
   font-weight: 800;
 }
+
+/* Prevent wild-color modal from being dismissed via backdrop on mobile.
+   Add class `.no-dismiss` on the modal element when the picker opens. */
+.modal-bg.no-dismiss { pointer-events: none; }
+.modal-bg.no-dismiss .modal { pointer-events: auto; }

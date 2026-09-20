@@ -284,3 +284,8 @@
     font-size: var(--fs-300);
   }
 }
+
+@media (max-width: 559px) {
+  .chat-form input,
+  .chat-form textarea { font-size: 16px; }
+}

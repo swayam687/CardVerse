@@ -1,14 +1,20 @@
 /* ============================================================
    RuleVerse — studio.css (Pulse)
    ============================================================ */
-textarea {
+
+.studio-textarea,
+.modal textarea {
   min-height: 260px;
-  background: #0F0F18;
-  color: #E9C46A;
-  border-color: #2A2A3C;
+  background: var(--code-bg, #0F0F18);
+  color: var(--code-fg, #E9C46A);
+  border-color: var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
 }
-html[data-theme="light"] textarea {
-  background: #F0F0F5;
-  color: #6B4F0C;
-  border-color: #E0E0E8;
+html[data-theme="light"] .studio-textarea,
+html[data-theme="light"] .modal textarea {
+  background: var(--code-bg, #F0F0F5);
+  color: var(--code-fg, #6B4F0C);
+  border-color: var(--border);
 }

@@ -1,46 +1,54 @@
 /* ============================================================
-   app.js — boot + GameFlow (Pulse, multiplayer-aware)
+   app.js — boot + GameFlow
+   v2.11: applyStateUpdate now polls for state.reveal and shows
+          the reveal modal for the correct (viewing) player.
    ============================================================ */
 
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const rnd = n => Math.floor(Math.random() * n);
-const mod = (n, m) => ((n % m) + m) % m;
-const shuffle = a => {
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = rnd(i + 1);
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const Toast = {
-  show(msg) {
+  _queue: [],
+  _busy: false,
+
+  show(msg) { this._queue.push({ kind: 'plain', msg }); this._pump(); },
+  achievement(def) { this._queue.push({ kind: 'ach', def }); this._pump(); },
+
+  _pump() {
+    if (this._busy) return;
+    const item = this._queue.shift();
+    if (!item) return;
+    this._busy = true;
+    if (item.kind === 'ach') this._showAch(item.def);
+    else this._showPlain(item.msg);
+  },
+  _done() { this._busy = false; setTimeout(() => this._pump(), 120); },
+
+  _showPlain(msg) {
     const t = document.createElement('div');
     t.className = 'toast';
     t.textContent = msg;
     document.body.appendChild(t);
     setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; }, 1500);
-    setTimeout(() => t.remove(), 1900);
+    setTimeout(() => { t.remove(); this._done(); }, 1900);
   },
-  achievement(def) {
+
+  _showAch(def) {
     const el = document.createElement('div');
     el.className = 'achievement-toast';
     el.innerHTML = `
-      <div class="ach-icon">${def.icon}</div>
+      <div class="ach-icon">${esc(def.icon || '🏆')}</div>
       <div class="ach-text">
         <div class="ach-label">ACHIEVEMENT</div>
-        <div class="ach-name">${esc(def.name)}</div>
-        <div class="ach-desc">${esc(def.desc)}</div>
+        <div class="ach-name">${esc(def.name || '')}</div>
+        <div class="ach-desc">${esc(def.desc || '')}</div>
       </div>
     `;
     document.body.appendChild(el);
     if (typeof Sound !== 'undefined' && Sound.achievement) Sound.achievement();
     if (typeof Haptics !== 'undefined') Haptics.win();
-    setTimeout(() => el.classList.add('out'), 4200);
-    setTimeout(() => el.remove(), 4700);
+    setTimeout(() => el.classList.add('out'), 3800);
+    setTimeout(() => { el.remove(); this._done(); }, 4300);
   }
 };
 
@@ -49,8 +57,43 @@ function show(id) {
   if (id === 'screen-win' || id === 'screen-home') ArenaView.stopTimer();
 }
 
+const COMMUNITY = { DISCORD_URL: 'https://discord.gg/ruleverse' };
+
+function openCommunityModal() {
+  if (typeof Modal === 'undefined') return;
+  const m = Modal.open(`
+    <h2>💬 Community</h2>
+    <div class="community-hero">
+      <div class="ch-icon">🌍</div>
+      <div class="ch-title">Join the RuleVerse</div>
+      <div class="ch-sub">Play, share decks, and vote on what's next.</div>
+    </div>
+    <div class="community-card">
+      <b>🎨 Vote for upcoming universes</b><br>
+      Head to <code>#universe-votes</code> in the Discord and pick your favourite.
+    </div>
+    <div class="community-card">
+      <b>🃏 Share custom decks</b><br>
+      Paste your Deck Studio JSON into <code>#deck-share</code>.
+    </div>
+    <div class="community-card">
+      <b>🐛 Report bugs &amp; ideas</b><br>
+      Drop them in <code>#feedback</code>.
+    </div>
+    <button class="btn primary big" style="width:100%;margin-top:16px" id="joinDiscord">Join Discord →</button>
+    <button class="btn ghost big" style="width:100%;margin-top:8px" id="communityClose">Close</button>
+  `);
+  if (!m) return;
+  m.querySelector('#joinDiscord').onclick = () => {
+    if (typeof Sound !== 'undefined') Sound.click();
+    try { window.open(COMMUNITY.DISCORD_URL, '_blank', 'noopener'); } catch (e) {}
+  };
+  m.querySelector('#communityClose').onclick = () => Modal.close();
+}
+
 const GameFlow = {
   lastConfig: null,
+  _winnerShown: false,
 
   startGame() {
     Net.active = false;
@@ -63,17 +106,31 @@ const GameFlow = {
     const names = ['You', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8'];
     const botNames = ['Nova', 'Rift', 'Echo', 'Vex', 'Zephyr', 'Onyx', 'Pixel'];
     const botAvatars = ['🤖', '👾', '🦊', '🐲', '🦉', '🐺', '👽'];
+    const avatarPool = (typeof AVATARS !== 'undefined' && Array.isArray(AVATARS))
+      ? AVATARS : ['🙂','😎','🦊','🐼','🐸','🐙','🦄','🐯'];
 
     const players = [];
     for (let i = 0; i < count; i++) {
       const isBot = i >= (count - bots);
       if (i === 0) {
-        players.push(makePlayer({ name: lv.profile.name || 'Player', avatar: lv.profile.avatar, isBot: false }));
+        players.push(makePlayer({
+          name: lv.profile.name || 'Player',
+          avatar: lv.profile.avatar || '🙂',
+          isBot: false
+        }));
       } else if (isBot) {
         const bi = i - (count - bots);
-        players.push(makePlayer({ name: botNames[bi % botNames.length], avatar: botAvatars[bi % botAvatars.length], isBot: true }));
+        players.push(makePlayer({
+          name: botNames[bi % botNames.length],
+          avatar: botAvatars[bi % botAvatars.length],
+          isBot: true
+        }));
       } else {
-        players.push(makePlayer({ name: names[i], avatar: AVATARS[(i * 3 + 4) % AVATARS.length], isBot: false }));
+        players.push(makePlayer({
+          name: names[i],
+          avatar: avatarPool[(i * 3 + 4) % avatarPool.length],
+          isBot: false
+        }));
       }
     }
 
@@ -84,7 +141,9 @@ const GameFlow = {
     const rulesLabel = RULE_PRESETS[RuleStudioView.presetKey]?.name || 'Custom';
 
     this.lastConfig = {
-      players, universeId: lv.universeId, customDef: lv.customDef,
+      players,
+      universeId: lv.universeId,
+      customDef: lv.customDef,
       rules: JSON.parse(JSON.stringify(RuleStudioView.rules)),
       universeName
     };
@@ -99,6 +158,8 @@ const GameFlow = {
     state.rulesLabel = rulesLabel;
 
     if (typeof Achievements !== 'undefined') Achievements.onMatchStart();
+    if (typeof PrivacyScreen !== 'undefined' && PrivacyScreen.reset) PrivacyScreen.reset();
+    this._winnerShown = false;
 
     show('screen-game');
     ArenaView.mount(state, 0);
@@ -106,43 +167,45 @@ const GameFlow = {
 
     let d = 0;
     for (let i = 0; i < count * 2; i++) setTimeout(() => Sound.deal(), (d++) * 45);
-
-    if (state.players[state.turn].isBot) setTimeout(() => BotAI.takeTurn(state), 1200);
   },
 
   startMultiplayer() {
     const room = Net.room;
     if (!room || !Net.isHost) return;
-    if (room.players.length < 2) { Toast.show('Need at least 2 players'); return; }
+    if ((room.players || []).length < 2) { Toast.show('Need at least 2 players'); return; }
 
-    const rules = RULE_PRESETS[room.rulesKey]
-      ? RULE_PRESETS[room.rulesKey].rules()
+    const key = room.rules || room.rulesKey;
+    const rules = RULE_PRESETS[key]
+      ? RULE_PRESETS[key].rules()
       : defaultRules();
+    const safeRules = (typeof sanitizeRules === 'function') ? sanitizeRules(rules) : rules;
 
-    const players = room.players.map(p =>
+    const players = (room.players || []).map(p =>
       makePlayer({ id: p.id, name: p.name, avatar: p.avatar, isBot: !!p.isBot }));
 
     const universeName = room.customDef
       ? `${room.customDef.name} (custom)`
-      : room.universeName;
+      : (room.universeName || room.universe || room.universeId || 'Marvel');
 
     const state = GameEngine.create({
       players,
-      universeId: room.universeId,
-      customDef: room.customDef,
-      rules,
+      universeId: room.universe || room.universeId || 'marvel',
+      customDef: room.customDef || null,
+      rules: safeRules,
       universeName
     });
-    state.rulesLabel = RULE_PRESETS[room.rulesKey]?.name || 'Custom';
+    state.rulesLabel = RULE_PRESETS[key]?.name || 'Custom';
 
     if (typeof Achievements !== 'undefined') Achievements.onMatchStart();
+    this._winnerShown = false;
 
-    Net.hostStartGame(state, room.rulesKey);
-    this.enterMultiplayerGame(state, room.rulesKey);
+    Net.hostStartGame(state, key);
+    this.enterMultiplayerGame(state, key);
   },
 
   enterMultiplayerGame(state, rulesKey) {
     ArenaView._cardPool = new Map();
+    this._winnerShown = false;
 
     const localIdx = state.players.findIndex(p => p.id === Net.playerId);
     show('screen-game');
@@ -151,11 +214,6 @@ const GameFlow = {
 
     let d = 0;
     for (let i = 0; i < state.players.length * 2; i++) setTimeout(() => Sound.deal(), (d++) * 45);
-
-    const cur = state.players[state.turn];
-    if (cur && cur.isBot && Net.isHost) {
-      setTimeout(() => BotAI.takeTurn(state), 1200);
-    }
   },
 
   applyStateUpdate(state) {
@@ -173,14 +231,46 @@ const GameFlow = {
   applyRemoteAction(fromId, action) {
     const s = ArenaView.state;
     if (!s || s.winner !== null) return;
+    if (!fromId || !action) return;
+
     const idx = s.players.findIndex(p => p.id === fromId);
     if (idx === -1) return;
-    // Only the current player can act
+
+    if (action.kind === 'CATCH') {
+      const res = GameEngine.catchUno(s, idx);
+      if (res && res.ok) ArenaView.afterAction();
+      return;
+    }
+
+    if (action.kind === 'CALL_LAST') {
+      if (!Array.isArray(s.lastCardCalled)) {
+        s.lastCardCalled = s.players.map(() => false);
+      }
+      if (s.players[idx].hand.length === 1) {
+        s.lastCardCalled[idx] = true;
+        GameEngine.log(`<b>${esc(s.players[idx].name)}</b> calls LAST CARD!`, 'hot');
+        ArenaView.afterAction();
+      }
+      return;
+    }
+
     if (s.turn !== idx) return;
+
+    if (action.kind === 'PLAY') {
+      const player = s.players[idx];
+      const card = player.hand.find(c => c.uid === action.uid);
+      if (!card) return;
+      if (!RuleEngine.isPlayable(card, s, s.rules)) return;
+      if (!RuleEngine.meetsRequirement(card, player, s.rules)) return;
+    }
 
     let res;
     if (action.kind === 'PLAY') {
-      res = GameEngine.playCard(s, idx, action.uid, action.color || null);
+      res = GameEngine.playCard(s, idx, action.uid, {
+        color: action.color || null,
+        targetIdx: action.targetIdx,
+        cardUid: action.cardUid
+      });
     } else if (action.kind === 'DRAW') {
       res = GameEngine.playerDraw(s, idx);
     } else if (action.kind === 'PASS') {
@@ -194,21 +284,38 @@ const GameFlow = {
   },
 
   showWinner(idx) {
+    if (this._winnerShown) return;
+    this._winnerShown = true;
+
     ArenaView.stopTimer();
     if (GameEngine._botTimer) { clearTimeout(GameEngine._botTimer); GameEngine._botTimer = null; }
 
     const s = ArenaView.state;
+    if (!s) return;
+    if (idx === -1) {
+      document.getElementById('winEmoji').textContent = '🤝';
+      document.getElementById('winTitle').textContent = 'Stalemate';
+      document.getElementById('winSub').textContent = 'Deck ran out with no winner.';
+      document.getElementById('winStats').innerHTML = '';
+      show('screen-win');
+      return;
+    }
     const p = s.players[idx];
-    const isMe = (Net.active && s.players[idx].id === Net.playerId) || (!Net.active && idx === 0);
+    if (!p) return;
+
+    const isMe = (Net.active && s.players[idx].id === Net.playerId) ||
+                 (!Net.active && idx === 0);
 
     if (typeof Achievements !== 'undefined') Achievements.onMatchEnd(idx, s);
 
     document.getElementById('winEmoji').textContent = isMe ? '🏆' : '💀';
     document.getElementById('winTitle').textContent = isMe ? 'Victory!' : `${p.name} wins`;
-    document.getElementById('winSub').textContent = isMe ? 'You emptied your hand first.' : 'Better luck next round.';
+    document.getElementById('winSub').textContent = isMe
+      ? 'You emptied your hand first.'
+      : 'Better luck next round.';
 
     const elapsed = Math.round((Date.now() - s.startedAt) / 1000);
-    const abilities = s.players.reduce((a, x) => a + x.stats.abilities, 0);
+    const abilities = s.players.reduce((a, x) => a + (x.stats?.abilities || 0), 0);
 
     document.getElementById('winStats').innerHTML = `
       <div class="win-stat"><div class="sv">${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}</div><div class="sk">Duration</div></div>
@@ -242,6 +349,7 @@ const GameFlow = {
     if (!this.lastConfig) return;
     ArenaView.stopTimer();
     if (GameEngine._botTimer) { clearTimeout(GameEngine._botTimer); GameEngine._botTimer = null; }
+    this._winnerShown = false;
 
     const cfg = this.lastConfig;
     cfg.players.forEach(p => {
@@ -258,15 +366,14 @@ const GameFlow = {
     state.rulesLabel = RULE_PRESETS[RuleStudioView.presetKey]?.name || 'Custom';
 
     if (typeof Achievements !== 'undefined') Achievements.onMatchStart();
+    if (typeof PrivacyScreen !== 'undefined' && PrivacyScreen.reset) PrivacyScreen.reset();
 
     show('screen-game');
     ArenaView.mount(state, 0);
     ArenaView.afterAction();
-    if (state.players[state.turn].isBot) setTimeout(() => BotAI.takeTurn(state), 1200);
   }
 };
 
-// ---------- Net event wiring ----------
 function wireNet() {
   Net.on('created',       msg => { RoomView.onCreated(msg); show('screen-room'); });
   Net.on('joined',        msg => { RoomView.onJoined(msg);  show('screen-room'); });
@@ -280,9 +387,14 @@ function wireNet() {
   Net.on('chat_cleared',  msg => RoomView.onChatCleared(msg));
   Net.on('emote',         msg => RoomView.onEmote(msg));
 
-  Net.on('game_start', msg => {
-    if (!Net.isHost) GameFlow.enterMultiplayerGame(msg.state, msg.rulesKey);
-  });
+  const onStart = msg => {
+    if (Net.isHost) return;
+    const state = msg.state || (msg.room && msg.room.state);
+    const rulesKey = msg.rulesKey || (msg.room && msg.room.rulesKey) || 'classic';
+    if (state) GameFlow.enterMultiplayerGame(state, rulesKey);
+  };
+  Net.on('start',      onStart);
+  Net.on('game_start', onStart);
 
   Net.on('state_update', msg => {
     if (Net.isHost) return;
@@ -291,14 +403,14 @@ function wireNet() {
 
   Net.on('action', msg => {
     if (!Net.isHost) return;
-    GameFlow.applyRemoteAction(msg.fromId, msg.action);
+    const from = msg.playerId || msg.fromId || msg.from;
+    GameFlow.applyRemoteAction(from, msg.action);
   });
 }
 
-// ---------- boot ----------
 (function boot() {
   Settings.init();
-  Achievements.init();
+  if (typeof Achievements !== 'undefined') Achievements.init();
   LobbyView.init();
   RoomView.init();
   wireNet();
@@ -308,10 +420,7 @@ function wireNet() {
     if (!s || s.winner !== null) return;
     if (s.turn !== ArenaView._localIdx) return;
     Sound.click(); Haptics.tap();
-    if (Net.active && !Net.isHost) {
-      Net.sendAction({ kind: 'DRAW' });
-      return;
-    }
+    if (Net.active && !Net.isHost) { Net.sendAction({ kind: 'DRAW' }); return; }
     const res = GameEngine.playerDraw(s, ArenaView._localIdx);
     if (!res.ok) { Toast.show(res.reason); Haptics.error(); return; }
     ArenaView.afterAction();
@@ -322,10 +431,7 @@ function wireNet() {
     if (!s || s.winner !== null) return;
     if (s.turn !== ArenaView._localIdx) return;
     Sound.click(); Haptics.tap();
-    if (Net.active && !Net.isHost) {
-      Net.sendAction({ kind: 'PASS' });
-      return;
-    }
+    if (Net.active && !Net.isHost) { Net.sendAction({ kind: 'PASS' }); return; }
     const res = GameEngine.playerPass(s, ArenaView._localIdx);
     if (!res.ok) { Toast.show(res.reason); Haptics.error(); return; }
     ArenaView.afterAction();
@@ -354,7 +460,7 @@ function wireNet() {
     if (GameEngine._botTimer) { clearTimeout(GameEngine._botTimer); GameEngine._botTimer = null; }
     ArenaView.state = null;
     ArenaView._cardPool = null;
-    PrivacyScreen.hide();
+    if (typeof PrivacyScreen !== 'undefined') PrivacyScreen.hide();
     const handEl = document.getElementById('hand');
     if (handEl) handEl.innerHTML = '';
     Sound.click();
@@ -397,11 +503,12 @@ function wireNet() {
       <h2>🔗 Join a Room</h2>
       <div class="hint">Enter the code your friend shared.</div>
       <label class="fl">Room Code</label>
-      <input id="joinCode" placeholder="ABCD-42" maxlength="10"
+      <input id="joinCode" placeholder="ABCDE" maxlength="10"
              style="text-transform:uppercase;letter-spacing:3px;font-weight:900">
       <button class="btn primary big" id="joinGo" style="width:100%;margin-top:16px">Join</button>
       <div class="hint" id="joinErr" style="color:var(--danger);display:none;margin-top:10px;font-weight:800"></div>
     `);
+    if (!m) return;
     const codeInp = m.querySelector('#joinCode');
     codeInp.focus();
     m.querySelector('#joinGo').onclick = async () => {
@@ -422,19 +529,46 @@ function wireNet() {
     });
   };
 
+  const btnAch = document.getElementById('btnAchievements');
+  if (btnAch) btnAch.onclick = () => {
+    Sound.click();
+    if (typeof Achievements !== 'undefined') Achievements.openHistoryModal();
+  };
+
+  const btnComm = document.getElementById('btnCommunity');
+  if (btnComm) btnComm.onclick = () => { Sound.click(); openCommunityModal(); };
+
   addEventListener('keydown', e => {
-    if (e.key === 'Escape') Modal.close();
-    if (e.key === 'd' && document.getElementById('screen-game').classList.contains('active'))
-      document.getElementById('btnDraw').click();
+    if (isTyping()) {
+      if (e.key === 'Escape' && Modal._isOpen && !Modal._forceChoice) Modal.close();
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+    if (e.key === 'Escape' && Modal._isOpen && !Modal._forceChoice) { Modal.close(); return; }
+
+    const inGame = document.getElementById('screen-game').classList.contains('active');
+    if (!inGame) return;
+
+    if (e.key === 'd') document.getElementById('btnDraw').click();
     if (e.key === ' ') {
       e.preventDefault();
-      if (document.getElementById('screen-game').classList.contains('active'))
-        document.getElementById('btnPass').click();
+      document.getElementById('btnPass').click();
+    }
+    if (e.key === 'c' || e.key === 'C') {
+      const bar = document.getElementById('lastCardBar');
+      if (bar && bar.style.display !== 'none') {
+        const b = document.getElementById('btnLastCard');
+        if (b) b.click();
+        return;
+      }
+      const cbtn = document.getElementById('btnCatchUno');
+      if (cbtn && cbtn.style.display !== 'none') cbtn.click();
     }
   });
 
   const unlock = () => {
-    Sound.click();
+    if (typeof Sound !== 'undefined' && !Sound.muted) Sound.click();
     document.removeEventListener('pointerdown', unlock);
   };
   document.addEventListener('pointerdown', unlock);
@@ -461,7 +595,9 @@ function wireNet() {
             if (st.pendingDraw > 0) {
               const stackable = p.hand.filter(c => RuleEngine.canStack(c, st, st.rules));
               if (stackable.length) {
-                GameEngine.playCard(st, st.turn, stackable[0].uid, GameEngine.botColorChoice(st, st.turn));
+                GameEngine.playCard(st, st.turn, stackable[0].uid, {
+                  color: GameEngine.botColorChoice(st, st.turn)
+                });
                 continue;
               }
               GameEngine.playerDraw(st, st.turn);
@@ -476,8 +612,24 @@ function wireNet() {
               continue;
             }
             const pick = BotAI.choose(playable, st, st.turn);
-            GameEngine.playCard(st, st.turn, pick.uid,
-              pick.color === 'wild' ? GameEngine.botColorChoice(st, st.turn) : null);
+            const opts = {};
+            if (pick.color === 'wild') opts.color = GameEngine.botColorChoice(st, st.turn);
+            const needsTarget = pick.effects.some(e => e.target === 'choose');
+            if (needsTarget) {
+              let bestT = -1, bestHand = -1;
+              st.players.forEach((q, qi) => {
+                if (qi === st.turn) return;
+                if (q.hand.length > bestHand) { bestHand = q.hand.length; bestT = qi; }
+              });
+              if (bestT === -1) continue;
+              opts.targetIdx = bestT;
+            }
+            const pickSteal = pick.effects.find(e => e.type === 'STEAL' && e.pick);
+            if (pickSteal && typeof opts.targetIdx === 'number') {
+              const victim = st.players[opts.targetIdx];
+              if (victim.hand.length) opts.cardUid = victim.hand[0].uid;
+            }
+            GameEngine.playCard(st, st.turn, pick.uid, opts);
           }
           if (st.winner === null) results.errors++;
           else results.wins[st.winner] = (results.wins[st.winner] || 0) + 1;
@@ -486,7 +638,8 @@ function wireNet() {
         } catch (e) { results.errors++; console.error('Sim error:', e); }
       }
       results.avgTurns = Math.round(results.turns / games);
-      console.table({ games, playerCount, universeId, presetKey, avgTurns: results.avgTurns, maxTurns: results.maxTurns, errors: results.errors });
+      console.table({ games, playerCount, universeId, presetKey,
+        avgTurns: results.avgTurns, maxTurns: results.maxTurns, errors: results.errors });
       return results;
     }
   };

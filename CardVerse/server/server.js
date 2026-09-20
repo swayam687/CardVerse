@@ -1,437 +1,436 @@
 /* ============================================================
-   RuleVerse relay server
-   ---------------------------------------------------------
-   · Serves the static client from the project root
-   · WebSocket relay for rooms, chat, game actions
-   · Host authority: state lives on the host's client
+   RuleVerse relay server — v2.12
+   - static file server (path-traversal safe)
+   - /r/ABCDE rewrite → index.html (invite links)
+   - WebSocket relay (host authority, no game logic)
+   - 30s heartbeat
+   - taunt + rematch_request relays
    ============================================================ */
 
 const http = require('http');
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
-const { randomUUID } = require('crypto');
 
 const PORT = process.env.PORT || 8080;
-const ROOT = path.join(__dirname, '..');
+const ROOT = path.resolve(path.join(__dirname, '..'));
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
-  '.css':  'text/css; charset=utf-8',
   '.js':   'application/javascript; charset=utf-8',
+  '.css':  'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
-  '.webp': 'image/webp',
+  '.svg':  'image/svg+xml',
   '.png':  'image/png',
   '.jpg':  'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.svg':  'image/svg+xml',
-  '.mp3':  'audio/mpeg',
-  '.woff2':'font/woff2',
-  '.ico':  'image/x-icon'
+  '.ico':  'image/x-icon',
+  '.txt':  'text/plain; charset=utf-8',
+  '.webmanifest': 'application/manifest+json'
 };
 
-const httpServer = http.createServer((req, res) => {
-  let urlPath = decodeURIComponent(req.url.split('?')[0]);
-  if (urlPath === '/') urlPath = '/index.html';
-  const filePath = path.join(ROOT, urlPath);
-  if (!filePath.startsWith(ROOT)) { res.writeHead(403); return res.end('Forbidden'); }
-  fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); return res.end('Not found'); }
-    const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-    res.end(data);
-  });
-});
+function serveStatic(req, res) {
+  let urlPath;
+  try { urlPath = decodeURIComponent((req.url || '/').split('?')[0]); }
+  catch (e) { res.writeHead(400).end('Bad request'); return; }
 
-const wss = new WebSocketServer({ server: httpServer });
+  if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
 
-const clients = new Map();  // id -> { id, ws, roomCode, name, avatar }
-const rooms = new Map();    // code -> room
+  // /r/ABCDE → serve index.html so invite links work
+  if (/^\/r\/[A-Z0-9]{4,8}\/?$/i.test(urlPath)) urlPath = '/index.html';
 
-function genId() { return randomUUID().replace(/-/g, '').slice(0, 12); }
-function genCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let s = '';
-  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s + '-' + (10 + Math.floor(Math.random() * 90));
-}
-
-function send(ws, msg) {
-  if (!ws || ws.readyState !== 1) return;
-  try { ws.send(JSON.stringify(msg)); } catch(e){}
-}
-function broadcast(room, msg, exceptId = null) {
-  for (const p of room.players) {
-    if (p.id === exceptId) continue;
-    const c = clients.get(p.id);
-    if (c && c.ws) send(c.ws, msg);
-  }
-}
-function roomSnapshot(room) {
-  return {
-    code: room.code,
-    hostId: room.hostId,
-    players: room.players.map(p => ({
-      id: p.id, name: p.name, avatar: p.avatar,
-      isBot: !!p.isBot, connected: !!p.connected
-    })),
-    universeId: room.universeId,
-    universeName: room.universeName,
-    customDef: room.customDef,
-    rulesKey: room.rulesKey,
-    started: room.started,
-    state: room.state || null
-  };
-}
-
-wss.on('connection', (ws) => {
-  const id = genId();
-  const client = { id, ws, roomCode: null, name: 'Player', avatar: '🙂' };
-  clients.set(id, client);
-  ws.clientId = id;
-  ws.isAlive = true;
-  ws.on('pong', () => { ws.isAlive = true; });
-
-  send(ws, { type: 'welcome', playerId: id });
-
-  ws.on('message', raw => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch (e) { return; }
-    try { handle(client, msg); } catch (e) { console.error('handle error:', e); }
-  });
-
-  ws.on('close', () => {
-    if (!client.roomCode) { clients.delete(id); return; }
-    const room = rooms.get(client.roomCode);
-    if (!room) { clients.delete(id); return; }
-    const player = room.players.find(p => p.id === client.id);
-    if (!player) { clients.delete(id); return; }
-
-    player.connected = false;
-    client.ws = null;
-
-    broadcast(room, { type: 'player_left', id: client.id, name: player.name });
-
-    if (client.id === room.hostId) {
-      broadcast(room, { type: 'room_closed', reason: 'Host disconnected' });
-      for (const p of room.players) {
-        const c = clients.get(p.id);
-        if (c) c.roomCode = null;
-      }
-      rooms.delete(room.code);
-      return;
-    }
-
-    if (!room.started) {
-      room.players = room.players.filter(p => p.id !== client.id);
-      client.roomCode = null;
-      if (room.players.length === 0) rooms.delete(room.code);
-      else broadcast(room, { type: 'room_update', room: roomSnapshot(room) });
-    } else {
-      broadcast(room, { type: 'room_update', room: roomSnapshot(room) });
-    }
-  });
-});
-
-setInterval(() => {
-  wss.clients.forEach(ws => {
-    if (!ws.isAlive) { try { ws.terminate(); } catch(e){} return; }
-    ws.isAlive = false;
-    try { ws.ping(); } catch(e){}
-  });
-}, 30000);
-
-// ---------- message handlers ----------
-function handle(client, msg) {
-  switch (msg.type) {
-    case 'create':        return onCreate(client, msg);
-    case 'join':          return onJoin(client, msg);
-    case 'rejoin':        return onRejoin(client, msg);
-    case 'leave':         return onLeave(client);
-    case 'update_room':   return onUpdateRoom(client, msg);
-    case 'add_bot':       return onAddBot(client, msg);
-    case 'remove_bot':    return onRemoveBot(client, msg);
-    case 'kick':          return onKick(client, msg);
-    case 'start':         return onStart(client, msg);
-    case 'cancel_game':   return onCancelGame(client);
-    case 'state_update':  return onStateUpdate(client, msg);
-    case 'action':        return onAction(client, msg);
-    case 'chat':          return onChat(client, msg);
-    case 'clear_chat':    return onClearChat(client);   // ← new
-    case 'emote':         return onEmote(client, msg);
-  }
-}
-
-function onClearChat(client) {
-  const room = rooms.get(client.roomCode);
-  if (!room) return;
-  // Host-only
-  if (client.id !== room.hostId) return;
-  broadcast(room, { type: 'chat_cleared', by: client.name });
-}
-
-function onCreate(client, msg) {
-  client.name = msg.name || 'Player';
-  client.avatar = msg.avatar || '🙂';
-
-  let code;
-  do { code = genCode(); } while (rooms.has(code));
-
-  const room = {
-    code,
-    hostId: client.id,
-    players: [{
-      id: client.id, name: client.name, avatar: client.avatar,
-      isBot: false, connected: true
-    }],
-    universeId: 'marvel',
-    universeName: '🦸 Marvel',
-    customDef: null,
-    rulesKey: 'classic',
-    started: false,
-    state: null
-  };
-  rooms.set(code, room);
-  client.roomCode = code;
-
-  send(client.ws, {
-    type: 'created',
-    code,
-    playerId: client.id,
-    room: roomSnapshot(room)
-  });
-}
-
-function onJoin(client, msg) {
-  const code = String(msg.code || '').toUpperCase().trim();
-  const room = rooms.get(code);
-  if (!room)                       return send(client.ws, { type: 'error', reason: 'Room not found' });
-  if (room.started)                return send(client.ws, { type: 'error', reason: 'Game already started' });
-  if (room.players.length >= 8)    return send(client.ws, { type: 'error', reason: 'Room is full' });
-  if (room.players.some(p => p.id === client.id))
-                                   return send(client.ws, { type: 'error', reason: 'Already in this room' });
-
-  client.name = msg.name || 'Player';
-  client.avatar = msg.avatar || '🙂';
-  client.roomCode = code;
-
-  room.players.push({
-    id: client.id, name: client.name, avatar: client.avatar,
-    isBot: false, connected: true
-  });
-
-  send(client.ws, {
-    type: 'joined',
-    code,
-    playerId: client.id,
-    room: roomSnapshot(room)
-  });
-  broadcast(room, { type: 'room_update', room: roomSnapshot(room) }, client.id);
-  broadcast(room, {
-    type: 'chat', system: true,
-    text: `${client.name} joined the room`,
-    ts: Date.now()
-  }, client.id);
-}
-
-// ── FIX 2: rejoin accepts the OLD player id and swaps the socket's identity
-function onRejoin(client, msg) {
-  const code = String(msg.code || '').toUpperCase().trim();
-  const oldId = msg.playerId;
-  const room = rooms.get(code);
-  if (!room) return send(client.ws, { type: 'error', reason: 'Room no longer exists' });
-
-  const player = oldId ? room.players.find(p => p.id === oldId) : null;
-  if (!player) return send(client.ws, { type: 'error', reason: 'You are not in this room' });
-
-  // Take over the old seat's identity on this socket
-  const newId = client.id;
-  const oldClient = clients.get(oldId);
-  if (oldClient && oldClient !== client && oldClient.ws) {
-    try { oldClient.ws.close(); } catch(e){}
-  }
-  clients.delete(newId);
-  client.id = oldId;
-  clients.set(oldId, client);
-
-  player.connected = true;
-  client.roomCode = code;
-  client.name = player.name;
-  client.avatar = player.avatar;
-
-  send(client.ws, {
-    type: 'rejoined',
-    code,
-    playerId: oldId,
-    room: roomSnapshot(room)
-  });
-  broadcast(room, {
-    type: 'chat', system: true,
-    text: `${player.name} reconnected`,
-    ts: Date.now()
-  }, oldId);
-  broadcast(room, { type: 'room_update', room: roomSnapshot(room) }, oldId);
-}
-
-function onLeave(client) {
-  const code = client.roomCode;
-  if (!code) return;
-  const room = rooms.get(code);
-  if (!room) return;
-  const player = room.players.find(p => p.id === client.id);
-  if (!player) return;
-
-  broadcast(room, { type: 'player_left', id: client.id, name: player.name });
-
-  if (client.id === room.hostId) {
-    broadcast(room, { type: 'room_closed', reason: 'Host left the room' });
-    for (const p of room.players) {
-      const c = clients.get(p.id);
-      if (c) c.roomCode = null;
-    }
-    rooms.delete(code);
+  const safe = path.normalize(path.join(ROOT, urlPath));
+  if (!safe.startsWith(ROOT + path.sep) && safe !== ROOT) {
+    res.writeHead(403).end('Forbidden');
     return;
   }
 
-  room.players = room.players.filter(p => p.id !== client.id);
-  client.roomCode = null;
-  if (room.players.length === 0) rooms.delete(code);
-  else broadcast(room, { type: 'room_update', room: roomSnapshot(room) });
-}
-
-function onUpdateRoom(client, msg) {
-  const room = rooms.get(client.roomCode);
-  if (!room) return;
-  if (client.id !== room.hostId) return;
-  if (room.started) return;
-
-  if (typeof msg.universeId === 'string')  room.universeId = msg.universeId;
-  if (typeof msg.universeName === 'string') room.universeName = msg.universeName;
-  if ('customDef' in msg) room.customDef = msg.customDef || null;
-  if (typeof msg.rulesKey === 'string')    room.rulesKey = msg.rulesKey;
-
-  broadcast(room, { type: 'room_update', room: roomSnapshot(room) });
-}
-
-function onAddBot(client, msg) {
-  const room = rooms.get(client.roomCode);
-  if (!room || client.id !== room.hostId || room.started) return;
-  if (room.players.length >= 8) return;
-
-  const botNames = ['Nova', 'Rift', 'Echo', 'Vex', 'Zephyr', 'Onyx', 'Pixel'];
-  const botAvatars = ['🤖', '👾', '🦊', '🐲', '🦉', '🐺', '👽'];
-  const botIdx = room.players.filter(p => p.isBot).length;
-
-  room.players.push({
-    id: 'bot-' + genId(),
-    name: botNames[botIdx % botNames.length],
-    avatar: botAvatars[botIdx % botAvatars.length],
-    isBot: true,
-    connected: true
+  fs.stat(safe, (err, stat) => {
+    if (err || !stat.isFile()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found');
+      return;
+    }
+    const ext = path.extname(safe).toLowerCase();
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=300'
+    });
+    fs.createReadStream(safe).pipe(res);
   });
-  broadcast(room, { type: 'room_update', room: roomSnapshot(room) });
 }
 
-function onRemoveBot(client, msg) {
-  const room = rooms.get(client.roomCode);
-  if (!room || client.id !== room.hostId || room.started) return;
-  room.players = room.players.filter(p => p.id !== msg.botId);
-  broadcast(room, { type: 'room_update', room: roomSnapshot(room) });
+const server = http.createServer(serveStatic);
+
+const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
+
+const rooms = new Map();
+
+function genCode() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < 5; i++) s += A[Math.floor(Math.random() * A.length)];
+  return rooms.has(s) ? genCode() : s;
 }
 
-function onKick(client, msg) {
-  const room = rooms.get(client.roomCode);
-  if (!room || client.id !== room.hostId || room.started) return;
-  const target = room.players.find(p => p.id === msg.playerId);
-  if (!target || target.isBot) return;
+function send(ws, obj) {
+  if (ws.readyState !== ws.OPEN) return;
+  try { ws.send(JSON.stringify(obj)); } catch (e) {}
+}
 
-  room.players = room.players.filter(p => p.id !== target.id);
-  const c = clients.get(target.id);
-  if (c) {
-    c.roomCode = null;
-    send(c.ws, { type: 'kicked', reason: 'Removed by the host' });
+function roomBroadcast(code, obj, exceptWs) {
+  const room = rooms.get(code);
+  if (!room) return;
+  for (const clientWs of room.clients.keys()) {
+    if (clientWs === exceptWs) continue;
+    send(clientWs, obj);
   }
-  broadcast(room, { type: 'room_update', room: roomSnapshot(room) });
 }
 
-function onStart(client, msg) {
-  const room = rooms.get(client.roomCode);
-  if (!room || client.id !== room.hostId || room.started) return;
-  if (room.players.length < 2) return;
+wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.roomCode = null;
+  ws.playerId = null;
+  ws.isHost = false;
 
-  room.state = msg.state;
-  room.started = true;
-  broadcast(room, {
-    type: 'game_start',
-    state: room.state,
-    rulesKey: room.rulesKey
+  ws.on('pong', () => { ws.isAlive = true; });
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); }
+    catch (e) { return; }
+    if (!msg || typeof msg.type !== 'string') return;
+
+    try { handleMessage(ws, msg); }
+    catch (e) { console.error('[msg]', msg.type, e); }
   });
+
+  ws.on('close', () => handleClose(ws));
+  ws.on('error', () => {});
+});
+
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) {
+      try { ws.terminate(); } catch (e) {}
+      continue;
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch (e) {}
+  }
+}, 30000);
+
+wss.on('close', () => clearInterval(heartbeat));
+
+function handleMessage(ws, msg) {
+  switch (msg.type) {
+    case 'create':          return onCreate(ws, msg);
+    case 'join':            return onJoin(ws, msg);
+    case 'rejoin':          return onRejoin(ws, msg);
+    case 'leave':           return onLeave(ws);
+    case 'update_room':     return onUpdateRoom(ws, msg);
+    case 'add_bot':         return onAddBot(ws, msg);
+    case 'remove_bot':      return onRemoveBot(ws, msg);
+    case 'kick':            return onKick(ws, msg);
+    case 'start':           return onStart(ws, msg);
+    case 'cancel_game':     return onCancelGame(ws);
+    case 'state_update':    return onStateUpdate(ws, msg);
+    case 'action':          return onAction(ws, msg);
+    case 'chat':            return onChat(ws, msg);
+    case 'clear_chat':      return onClearChat(ws);
+    case 'emote':           return onEmote(ws, msg);
+    case 'taunt':           return onTaunt(ws, msg);
+    case 'rematch_request': return onRematchRequest(ws, msg);
+    case 'set_badge':       return onSetBadge(ws, msg);
+    default:                return;
+  }
 }
 
-// ── FIX 4: host cancels a running match and returns everyone to the room
-function onCancelGame(client) {
-  const room = rooms.get(client.roomCode);
-  if (!room || client.id !== room.hostId) return;
-  if (!room.started) return;
-  room.started = false;
-  room.state = null;
-  broadcast(room, { type: 'room_update', room: roomSnapshot(room) });
+function makeRoom(name, universe, rules) {
+  const code = genCode();
+  const room = {
+    code,
+    host: null,
+    clients: new Map(),
+    name: name || 'Room',
+    universe: universe || 'marvel',
+    rules: rules || 'classic',
+    started: false,
+    chat: []
+  };
+  rooms.set(code, room);
+  return room;
 }
 
-function onStateUpdate(client, msg) {
-  const room = rooms.get(client.roomCode);
-  if (!room || client.id !== room.hostId) return;
-  room.state = msg.state;
-  broadcast(room, {
-    type: 'state_update',
-    state: room.state
-  }, client.id);
+function roomSummary(room) {
+  return {
+    code: room.code,
+    name: room.name,
+    universe: room.universe,
+    rules: room.rules,
+    started: room.started,
+    hostId: room.host ? room.host.playerId : null,
+    players: Array.from(room.clients.values()).map(p => ({
+      id: p.playerId,
+      name: p.name,
+      avatar: p.avatar,
+      isBot: !!p.isBot,
+      isHost: !!p.isHost,
+      connected: true,
+      badgeId: p.badgeId || null
+    }))
+  };
 }
 
-function onAction(client, msg) {
-  const room = rooms.get(client.roomCode);
-  if (!room || !room.started) return;
-  const host = clients.get(room.hostId);
-  if (!host || !host.ws) return;
-  send(host.ws, {
-    type: 'action',
-    fromId: client.id,
-    fromName: client.name,
-    action: msg.action
+function onCreate(ws, msg) {
+  const room = makeRoom(msg.name, msg.universe, msg.rules);
+  room.host = ws;
+  ws.roomCode = room.code;
+  ws.playerId = msg.playerId || 'p1';
+  ws.isHost = true;
+  room.clients.set(ws, {
+    playerId: ws.playerId,
+    name: msg.playerName || msg.name || 'Host',
+    avatar: msg.avatar || '🙂',
+    isBot: false,
+    isHost: true,
+    badgeId: typeof msg.badgeId === 'string' ? msg.badgeId.slice(0, 32) : null
   });
+  send(ws, { type: 'created', code: room.code, you: ws.playerId });
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
 }
 
-function onChat(client, msg) {
-  const room = rooms.get(client.roomCode);
+function onJoin(ws, msg) {
+  const room = rooms.get((msg.code || '').toUpperCase());
+  if (!room) return send(ws, { type: 'error', code: 'no_room', message: 'Room not found' });
+  if (room.started) return send(ws, { type: 'error', code: 'in_progress', message: 'Match already started' });
+  if (room.clients.size >= 8) return send(ws, { type: 'error', code: 'full', message: 'Room is full' });
+
+  ws.roomCode = room.code;
+  ws.playerId = msg.playerId || `p${room.clients.size + 1}`;
+  ws.isHost = false;
+  room.clients.set(ws, {
+    playerId: ws.playerId,
+    name: msg.playerName || msg.name || 'Player',
+    avatar: msg.avatar || '🙂',
+    isBot: false,
+    isHost: false,
+    badgeId: typeof msg.badgeId === 'string' ? msg.badgeId.slice(0, 32) : null
+  });
+  send(ws, { type: 'joined', code: room.code, you: ws.playerId });
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+function onRejoin(ws, msg) {
+  const room = rooms.get((msg.code || '').toUpperCase());
+  if (!room) return send(ws, { type: 'error', code: 'no_room', message: 'Room not found' });
+
+  let stale = null;
+  for (const [clientWs, info] of room.clients.entries()) {
+    if (info.playerId === msg.playerId && clientWs !== ws) { stale = clientWs; break; }
+  }
+  if (stale) room.clients.delete(stale);
+
+  ws.roomCode = room.code;
+  ws.playerId = msg.playerId;
+  ws.isHost = room.host === stale;
+  if (ws.isHost) room.host = ws;
+
+  room.clients.set(ws, {
+    playerId: msg.playerId,
+    name: msg.playerName || msg.name || 'Player',
+    avatar: msg.avatar || '🙂',
+    isBot: false,
+    isHost: ws.isHost,
+    badgeId: typeof msg.badgeId === 'string' ? msg.badgeId.slice(0, 32) : null
+  });
+  send(ws, { type: 'rejoined', code: room.code, you: ws.playerId, isHost: ws.isHost, room: roomSummary(room) });
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) }, ws);
+}
+
+function onLeave(ws) {
+  const room = rooms.get(ws.roomCode);
   if (!room) return;
-  const text = String(msg.text || '').slice(0, 240).trim();
-  if (!text) return;
-  broadcast(room, {
-    type: 'chat',
-    from: client.id,
-    name: client.name,
-    avatar: client.avatar,
+  const wasHost = room.host === ws;
+  room.clients.delete(ws);
+
+  if (wasHost) {
+    roomBroadcast(room.code, { type: 'room_closed' });
+    rooms.delete(room.code);
+    return;
+  }
+  roomBroadcast(room.code, { type: 'player_left', playerId: ws.playerId });
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+function onUpdateRoom(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host !== ws) return;
+  if (typeof msg.name === 'string') room.name = msg.name.slice(0, 40);
+  if (typeof msg.universe === 'string') room.universe = msg.universe;
+  if (typeof msg.rules === 'string') room.rules = msg.rules;
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+function onAddBot(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host !== ws) return;
+  if (room.clients.size >= 8) return;
+  const botId = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+  room.clients.set({ readyState: 3 }, {
+    playerId: botId, name: msg.name || 'Bot',
+    avatar: msg.avatar || '🤖', isBot: true, isHost: false, badgeId: null
+  });
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+function onRemoveBot(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host !== ws) return;
+  for (const [clientWs, info] of room.clients.entries()) {
+    if (info.isBot && info.playerId === msg.playerId) { room.clients.delete(clientWs); break; }
+  }
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+function onKick(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host !== ws) return;
+  for (const [clientWs, info] of room.clients.entries()) {
+    if (info.playerId === msg.playerId && !info.isBot) {
+      send(clientWs, { type: 'kicked' });
+      try { clientWs.close(); } catch (e) {}
+      room.clients.delete(clientWs);
+      break;
+    }
+  }
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+function onStart(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host !== ws) return;
+  room.started = true;
+  roomBroadcast(room.code, {
+    type: 'start',
+    state: msg.state,
+    rulesKey: msg.rulesKey,
+    config: msg.config || {},
+    room: roomSummary(room)
+  });
+}
+
+function onCancelGame(ws) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host !== ws) return;
+  room.started = false;
+  roomBroadcast(room.code, { type: 'cancel_game', room: roomSummary(room) });
+}
+
+function onStateUpdate(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host !== ws) return;
+  roomBroadcast(room.code, { type: 'state_update', state: msg.state }, ws);
+}
+
+function onAction(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host === ws) return;
+  send(room.host, { type: 'action', playerId: ws.playerId, action: msg.action });
+}
+
+function onChat(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room) return;
+  const text = String(msg.text || '').slice(0, 200);
+  if (!text.trim()) return;
+  const from = room.clients.get(ws);
+  const line = {
+    from: from ? from.name : 'Player',
+    avatar: from ? from.avatar : '🙂',
     text,
     ts: Date.now()
+  };
+  room.chat.push(line);
+  if (room.chat.length > 100) room.chat.shift();
+  roomBroadcast(room.code, {
+    type: 'chat',
+    from: line.from,
+    avatar: line.avatar,
+    text: line.text,
+    ts: line.ts,
+    line
   });
 }
 
-function onEmote(client, msg) {
-  const room = rooms.get(client.roomCode);
-  if (!room) return;
-  broadcast(room, {
-    type: 'emote',
-    from: client.id,
-    name: client.name,
-    emoji: String(msg.emoji || '').slice(0, 4),
-    ts: Date.now()
-  }, client.id);
+function onClearChat(ws) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || room.host !== ws) return;
+  room.chat = [];
+  const me = room.clients.get(ws);
+  roomBroadcast(room.code, { type: 'chat_cleared', by: me ? me.name : 'Host' });
 }
 
-httpServer.listen(PORT, () => {
-  console.log('');
-  console.log('  RuleVerse relay running');
-  console.log('  → http://localhost:' + PORT);
-  console.log('  → On your LAN: http://<your-ip>:' + PORT);
-  console.log('');
+function onEmote(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room) return;
+  const from = room.clients.get(ws);
+  roomBroadcast(room.code, {
+    type: 'emote',
+    from: from ? from.playerId : null,
+    emoji: String(msg.emoji || '').slice(0, 4)
+  }, ws);
+}
+
+function onTaunt(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room) return;
+  const from = room.clients.get(ws);
+  const text = String(msg.text || '').slice(0, 80);
+  if (!text) return;
+  roomBroadcast(room.code, {
+    type: 'taunt',
+    from: from ? from.playerId : null,
+    fromName: from ? from.name : 'Player',
+    text
+  }, ws);
+}
+
+function onRematchRequest(ws) {
+  const room = rooms.get(ws.roomCode);
+  if (!room || !room.host) return;
+  const from = room.clients.get(ws);
+  send(room.host, {
+    type: 'rematch_request',
+    from: from ? from.playerId : null,
+    fromName: from ? from.name : 'Player'
+  });
+}
+
+function onSetBadge(ws, msg) {
+  const room = rooms.get(ws.roomCode);
+  if (!room) return;
+  const me = room.clients.get(ws);
+  if (!me) return;
+  me.badgeId = (typeof msg.badgeId === 'string' && msg.badgeId)
+    ? msg.badgeId.slice(0, 32)
+    : null;
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+function handleClose(ws) {
+  const room = rooms.get(ws.roomCode);
+  if (!room) return;
+  const wasHost = room.host === ws;
+  const info = room.clients.get(ws);
+  room.clients.delete(ws);
+  if (wasHost) {
+    roomBroadcast(room.code, { type: 'room_closed' });
+    rooms.delete(room.code);
+    return;
+  }
+  if (info) roomBroadcast(room.code, { type: 'player_left', playerId: info.playerId });
+  roomBroadcast(room.code, { type: 'room_update', room: roomSummary(room) });
+}
+
+server.listen(PORT, () => {
+  console.log(`RuleVerse relay listening on :${PORT} (serving ${ROOT})`);
 });

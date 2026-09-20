@@ -1,10 +1,14 @@
 /* ============================================================
-   core/Deck.js
+   js/core/Deck.js
+   buildDeck — assembles + shuffles a deck from a universe def.
    ============================================================ */
+
 function buildDeck(universeId, customDef) {
-  const u = customDef || UNIVERSES[universeId];
+  const u = customDef || (typeof UNIVERSES !== 'undefined' ? UNIVERSES[universeId] : null);
+  if (!u) throw new Error(`Unknown universe: ${universeId}`);
   const deck = [];
 
+  // Numbers: value 0 = single copy, 1..9 = two copies each.
   if (u.numberNames) {
     for (const color of u.colors) {
       const names = u.numberNames[color] || [];
@@ -20,9 +24,14 @@ function buildDeck(universeId, customDef) {
     }
   }
 
+  // Actions / wilds.
   for (const a of (u.actions || [])) {
-    const count = a.count || 1;
+    const count = clamp(Number(a.count) || 1, 0, 12);
     for (let i = 0; i < count; i++) deck.push(makeCard(a, universeId));
+  }
+
+  if (deck.length < 20) {
+    console.warn(`[Deck] Suspiciously small deck for "${universeId}": ${deck.length} cards.`);
   }
 
   return shuffle(deck);

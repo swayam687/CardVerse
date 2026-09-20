@@ -3,7 +3,9 @@
    ============================================================ */
 
 :root {
-  --font: 'Nunito Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+ --font: 'Nunito Sans', sans-serif;
+--code-bg: #0F0F18;
+--code-fg: #E9C46A;
 
   --fs-100: 10px;
   --fs-200: 12px;
@@ -72,6 +74,8 @@ html[data-theme="light"] {
   --bg-surface-3: #E4E4EC;
   --border: #E0E0E8;
   --border-strong: #C8C8D4;
+  --code-bg: #F0F0F5;
+--code-fg: #6B4F0C;
 
   --accent: #E63D5C;
   --accent-hover: #FF4D6D;
@@ -340,6 +344,33 @@ textarea {
   border-radius: var(--r-sm);
 }
 
+/* NEW: warn variant */
+.btn.warn {
+  background: linear-gradient(135deg, #FFB020, #E67E22);
+  border-color: transparent;
+  color: #1A0F00;
+  box-shadow: 0 6px 18px -6px #E67E22;
+}
+.btn.warn:hover:not(:disabled) { background: linear-gradient(135deg, #FFC04A, #F39C12); }
+
+/* NEW: danger variant (CATCH button) */
+.btn.danger {
+  background: linear-gradient(135deg, #E63946, #C42E4A);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 6px 18px -6px #E63946;
+}
+.btn.danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #FF5060, #E63946);
+}
+.btn.danger.pulse {
+  animation: dangerPulse 1.2s ease-in-out infinite;
+}
+@keyframes dangerPulse {
+  0%, 100% { box-shadow: 0 6px 18px -6px #E63946; }
+  50%      { box-shadow: 0 6px 22px 0 #E63946, 0 0 0 6px rgba(230,57,70,.15); }
+}
+
 .icon-btn {
   width: 40px; height: 40px;
   padding: 0;
@@ -484,11 +515,518 @@ html.reduced-motion *::after {
 
 .row { display: flex; gap: var(--s-3); flex-wrap: wrap; }
 
-/* iOS: 16px minimum on all inputs to prevent zoom-on-focus */
+/* iOS: 16px minimum on inputs to prevent zoom-on-focus */
 @media (max-width: 559px) {
-  input,
-  textarea,
-  select {
-    font-size: 16px;
+  input, textarea, select { font-size: 16px; }
+}
+
+/* ─── Touch devices: kill sticky hover transforms ─── */
+@media (hover: none) {
+  .btn:hover, .link-btn:hover, .btn-hero:hover, .btn-mini:hover { transform: none; }
+}
+
+/* ============================================================
+   NEW FEATURES (v2.2)
+   ============================================================ */
+
+/* ── Card deal-in stagger ────────────────────────────── */
+@keyframes cardDealIn {
+  from { opacity: 0; transform: translateY(-32px) rotate(-10deg) scale(.82); }
+  to   { opacity: 1; transform: translateY(0) rotate(0) scale(1); }
+}
+.card.deal-in {
+  animation: cardDealIn .45s cubic-bezier(.2,.8,.3,1) backwards;
+}
+
+/* ── Thinking indicator: dot (fallback) ─────────────── */
+.think-dot {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 10px; height: 10px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  animation: thinkPulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 3;
+}
+@keyframes thinkPulse {
+  0%, 100% { transform: scale(1);   opacity: 1;   }
+  50%      { transform: scale(1.5); opacity: .55; }
+}
+.opp { position: relative; }
+
+/* ── Thinking indicator: badge (preferred) ──────────── */
+.think-badge {
+  position: absolute;
+  top: 2px; right: 2px;
+  width: 28px; height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  opacity: .85;
+  filter: drop-shadow(0 0 3px rgba(255,77,109,.35));
+  pointer-events: none;
+  z-index: 3;
+  transition: opacity .2s;
+}
+.think-badge.pulsing {
+  opacity: 1;
+  animation: badgePulse 1.2s ease-in-out infinite;
+}
+@keyframes badgePulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 5px rgba(255,77,109,.7));
   }
+  50% {
+    transform: scale(1.22);
+    filter: drop-shadow(0 0 10px rgba(255,77,109,1))
+            drop-shadow(0 0 16px rgba(255,77,109,.6));
+  }
+}
+
+/* ── Opponent badge next to name (fallback display) ─── */
+.opp-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  font-size: 14px;
+  line-height: 1;
+  filter: drop-shadow(0 0 4px rgba(255,77,109,.5));
+}
+
+/* ── Last-card call bar ─────────────────────────────── */
+.last-card-bar {
+  padding: 0 var(--s-3) var(--s-2);
+  animation: lastCardIn .35s cubic-bezier(.2,.9,.3,1.4);
+}
+.last-card-bar .btn.warn {
+  width: 100%;
+  font-weight: 900;
+  letter-spacing: 1px;
+  animation: lastCardGlow 1.4s ease-in-out infinite;
+}
+@keyframes lastCardIn {
+  from { opacity: 0; transform: translateY(14px) scale(.95); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes lastCardGlow {
+  0%, 100% { box-shadow: 0 6px 18px -6px #E67E22, 0 0 0 0 rgba(255,176,32,.4); }
+  50%      { box-shadow: 0 6px 22px -4px #E67E22, 0 0 0 8px rgba(255,176,32,0); }
+}
+
+/* ── Controls row: DRAW / CATCH / PASS side by side ─── */
+#controlsRow {
+  display: flex;
+  gap: var(--s-2);
+  align-items: stretch;
+}
+#controlsRow > .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 10px;
+  font-size: 13px;
+  letter-spacing: .5px;
+}
+#controlsRow > .btn#btnCatchUno {
+  flex: 1.15 1 0;
+  font-size: 12px;
+}
+
+/* ── Achievements history modal ─────────────────────── */
+.ach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}
+.ach-cell {
+  position: relative;
+  text-align: left;
+  background: var(--bg-surface-2);
+  border: 2px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 12px 14px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-family: inherit;
+  transition: transform .12s, border-color .18s, background .18s, box-shadow .2s;
+}
+.ach-cell:hover:not(.locked) { transform: translateY(-2px); border-color: var(--border-strong); }
+.ach-cell.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ach-cell.locked { opacity: .45; cursor: not-allowed; }
+.ach-cell-icon {
+  font-size: 30px;
+  line-height: 1;
+  margin-bottom: 6px;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.4));
+}
+.ach-cell-name { font-size: var(--fs-300); font-weight: 900; letter-spacing: -0.2px; }
+.ach-cell-desc { font-size: var(--fs-100); color: var(--text-secondary); margin-top: 4px; font-weight: 700; line-height: 1.35; }
+.ach-cell-lock {
+  position: absolute;
+  top: 8px; right: 8px;
+  font-size: 14px;
+  opacity: .9;
+}
+.ach-progress {
+  margin-top: var(--s-4);
+  padding: 10px 14px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: var(--fs-200);
+  font-weight: 800;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.ach-progress b { color: var(--accent); }
+
+/* ── Community modal ────────────────────────────────── */
+.community-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 0 8px;
+  text-align: center;
+}
+.community-hero .ch-icon { font-size: 54px; line-height: 1; }
+.community-hero .ch-title { font-size: var(--fs-600); font-weight: 900; letter-spacing: -0.5px; }
+.community-hero .ch-sub { color: var(--text-secondary); font-size: var(--fs-300); font-weight: 700; }
+.community-card {
+  margin-top: var(--s-3);
+  padding: 14px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: var(--fs-300);
+  font-weight: 700;
+  line-height: 1.5;
+}
+.community-card code {
+  background: var(--code-bg, #0F0F18);
+  color: var(--code-fg, #E9C46A);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Inline badge chip shown next to my count */
+.my-badge-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+  font-size: 16px;
+  filter: drop-shadow(0 0 4px rgba(255,77,109,.55));
+}
+
+/* Reduced motion respect */
+@media (prefers-reduced-motion: reduce) {
+  .card.deal-in { animation: none; }
+  .think-dot { animation: none; }
+  .think-badge.pulsing { animation: none; }
+  .last-card-bar { animation: none; }
+  .last-card-bar .btn.warn { animation: none; }
+  .btn.danger.pulse { animation: none; }
+}
+html.reduced-motion .card.deal-in,
+html.reduced-motion .think-dot,
+html.reduced-motion .think-badge.pulsing,
+html.reduced-motion .last-card-bar,
+html.reduced-motion .last-card-bar .btn.warn,
+html.reduced-motion .btn.danger.pulse {
+  animation: none !important;
+}
+
+/* ============================================================
+   v2.4 — Pending-draw badge, player picker, card picker
+   ============================================================ */
+
+/* Pending-draw badge on the discard pile */
+.pending-draw-badge {
+  position: absolute;
+  top: -12px;
+  right: -10px;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 900;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: var(--r-full);
+  box-shadow: 0 4px 14px -2px rgba(230,57,70,.7), 0 0 0 3px var(--bg-base);
+  z-index: 5;
+  animation: pdbPulse 1s ease-in-out infinite;
+  pointer-events: none;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+@keyframes pdbPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.14); }
+}
+#discardSlot { position: relative; }
+
+/* Player picker modal (SWAP_HANDS / STEAL with target: 'choose') */
+.player-pick-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+.player-pick-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-400);
+  font-weight: 800;
+  text-align: left;
+  transition: background .15s, border-color .15s, transform .12s;
+}
+.player-pick-btn:hover {
+  background: var(--bg-surface-3);
+  border-color: var(--border-strong);
+  transform: translateX(2px);
+}
+.player-pick-btn .pp-av { font-size: 26px; flex: 0 0 auto; }
+.player-pick-btn .pp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-pick-btn .pp-cnt { color: var(--text-secondary); font-size: var(--fs-200); font-weight: 700; }
+
+/* Card picker modal (STEAL with pick: true) */
+.card-pick-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+  justify-content: center;
+  padding: 4px;
+}
+.card-pick-grid .card {
+  cursor: pointer;
+  transition: transform .15s, box-shadow .2s;
+}
+.card-pick-grid .card:hover {
+  transform: translateY(-6px) scale(1.06);
+  box-shadow: 0 10px 26px -8px var(--accent);
+}
+
+/* Reduced motion override */
+html.reduced-motion .pending-draw-badge { animation: none !important; }
+/* ============================================================
+   v2.5 — Fullscreen reveal, mode chip, pick-card polish
+   ============================================================ */
+
+/* Fullscreen reveal overlay */
+.reveal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30000;
+  background: rgba(8,8,15,.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn .2s ease;
+}
+.reveal-inner {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  padding: 20px;
+  width: min(620px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  text-align: center;
+  box-shadow: var(--sh-lg);
+}
+.reveal-inner h2 {
+  font-size: var(--fs-500);
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+.reveal-hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin: 14px 0 4px;
+  padding: 4px;
+}
+.reveal-hand .card {
+  transform: scale(.95);
+  pointer-events: none;
+}
+.reveal-hand .card:hover { transform: scale(.95); }
+
+/* Mode chip in hand-meta */
+.mode-chip {
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  align-self: center;
+  white-space: nowrap;
+}
+
+/* Pending-draw badge */
+.pending-draw-badge {
+  position: absolute;
+  top: -12px;
+  right: -10px;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 900;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: var(--r-full);
+  box-shadow: 0 4px 14px -2px rgba(230,57,70,.7), 0 0 0 3px var(--bg-base);
+  z-index: 5;
+  animation: pdbPulse 1s ease-in-out infinite;
+  pointer-events: none;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+@keyframes pdbPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.14); }
+}
+#discardSlot { position: relative; }
+
+/* Player picker */
+.player-pick-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+.player-pick-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-400);
+  font-weight: 800;
+  text-align: left;
+  transition: background .15s, border-color .15s, transform .12s;
+}
+.player-pick-btn:hover {
+  background: var(--bg-surface-3);
+  border-color: var(--border-strong);
+  transform: translateX(2px);
+}
+.player-pick-btn .pp-av { font-size: 26px; flex: 0 0 auto; }
+.player-pick-btn .pp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-pick-btn .pp-cnt { color: var(--text-secondary); font-size: var(--fs-200); font-weight: 700; }
+
+/* Card picker grid */
+.card-pick-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+  justify-content: center;
+  padding: 6px;
+}
+.card-pick-grid .card {
+  cursor: pointer;
+  transition: transform .15s, box-shadow .2s;
+}
+.card-pick-grid .card:hover {
+  transform: translateY(-6px) scale(1.06);
+  box-shadow: 0 10px 26px -8px var(--accent);
+}
+
+/* Reduced motion */
+html.reduced-motion .pending-draw-badge { animation: none !important; }
+html.reduced-motion .reveal-overlay { animation: none !important; }
+
+/* ============================================================
+   v2.8 — Card picker wrapper button fix
+   The modal wrapper guarantees interactive clicks even when
+   cards.css sets pointer-events: none on .card outside the hand.
+   ============================================================ */
+
+.card-pick-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+  justify-content: center;
+  padding: 6px;
+  pointer-events: auto;
+}
+
+.card-pick-btn {
+  display: block;
+  background: transparent;
+  border: 0;
+  padding: 4px;
+  margin: 0;
+  cursor: pointer;
+  pointer-events: auto !important;
+  border-radius: var(--r-md);
+  transition: transform .15s, box-shadow .2s, background .15s;
+}
+.card-pick-btn:hover {
+  transform: translateY(-6px) scale(1.05);
+  background: var(--accent-soft);
+  box-shadow: 0 10px 26px -8px var(--accent);
+}
+.card-pick-btn:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.card-pick-btn .card {
+  pointer-events: none !important;   /* clicks bubble to the wrapper */
+}
+.card-pick-btn .card * {
+  pointer-events: none !important;   /* grandchildren too */
+}
+
+/* Force-enable pointer events inside every modal for buttons + pickers */
+.modal .card-pick-grid,
+.modal .card-pick-btn,
+.modal .player-pick-grid,
+.modal .player-pick-btn {
+  pointer-events: auto !important;
 }

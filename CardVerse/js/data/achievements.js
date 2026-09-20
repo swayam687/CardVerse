@@ -1,5 +1,6 @@
 /* ============================================================
    data/achievements.js — 10 achievements with tracking + toasts
+   + badge selection (used as thinking-indicator next to your name)
    ============================================================ */
 const ACHIEVEMENTS = {
   first_blood:  { icon: '🏆', name: 'First Blood',   desc: 'Win your first match' },
@@ -97,5 +98,105 @@ const Achievements = {
     this._save();
   },
 
-  getUnlockedIds() { return Object.keys(this.unlocked); }
+  getUnlockedIds() { return Object.keys(this.unlocked); },
+
+  /* ─── NEW: badge selection ────────────────────────────── */
+
+  /** Currently selected badge achievement id (or null). */
+  getBadgeId() {
+    try {
+      const id = localStorage.getItem('rv_badge');
+      if (!id) return null;
+      if (!this.unlocked[id]) return null; // was cleared / not unlocked
+      return id;
+    } catch (e) { return null; }
+  },
+
+  setBadgeId(id) {
+    try {
+      if (id && this.unlocked[id]) localStorage.setItem('rv_badge', id);
+      else localStorage.removeItem('rv_badge');
+    } catch (e) {}
+  },
+
+  /** Emoji of the currently selected badge, or null. */
+  getBadgeEmoji() {
+    const id = this.getBadgeId();
+    if (!id) return null;
+    const def = ACHIEVEMENTS[id];
+    return def ? def.icon : null;
+  },
+
+  /** Achievement emoji for an arbitrary id (used to render other players' badges). */
+  emojiFor(id) {
+    const def = id && ACHIEVEMENTS[id];
+    return def ? def.icon : null;
+  },
+
+  /** Open the history + badge picker modal. */
+  openHistoryModal() {
+    if (typeof Modal === 'undefined') return;
+
+    const ids = Object.keys(ACHIEVEMENTS);
+    const current = this.getBadgeId();
+
+    const m = Modal.open(`
+      <h2>🏅 Achievements</h2>
+      <div class="hint">Unlock to earn a badge. Pick one to wear next to your name in matches.</div>
+      <div class="ach-grid" id="achGrid"></div>
+      <div class="ach-progress" id="achProgress"></div>
+      <button class="btn ghost big" style="width:100%;margin-top:14px" id="achClear">Clear Badge</button>
+      <button class="btn primary big" style="width:100%;margin-top:8px" id="achClose">Done</button>
+    `);
+    if (!m) return;
+
+    const grid = m.querySelector('#achGrid');
+    let count = 0;
+
+    ids.forEach(id => {
+      const def = ACHIEVEMENTS[id];
+      const unlocked = !!this.unlocked[id];
+      if (unlocked) count++;
+
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'ach-cell' +
+        (unlocked ? '' : ' locked') +
+        (id === current ? ' active' : '');
+      el.dataset.id = id;
+      el.innerHTML = `
+        <div class="ach-cell-icon">${def.icon}</div>
+        <div class="ach-cell-name">${esc(def.name)}</div>
+        <div class="ach-cell-desc">${esc(def.desc)}</div>
+        ${unlocked ? '' : '<div class="ach-cell-lock">🔒</div>'}
+      `;
+
+      if (unlocked) {
+        el.onclick = () => {
+          if (typeof Sound !== 'undefined') Sound.click();
+          this.setBadgeId(id);
+          if (typeof Net !== 'undefined' && Net.active && Net.setBadge) {
+            Net.setBadge(id);
+          }
+          grid.querySelectorAll('.ach-cell').forEach(c => c.classList.remove('active'));
+          el.classList.add('active');
+        };
+      }
+      grid.appendChild(el);
+    });
+
+    m.querySelector('#achProgress').innerHTML =
+      `Unlocked <b>${count}</b> / <b>${ids.length}</b>`;
+
+    m.querySelector('#achClear').onclick = () => {
+      if (typeof Sound !== 'undefined') Sound.click();
+      this.setBadgeId(null);
+      if (typeof Net !== 'undefined' && Net.active && Net.setBadge) {
+        Net.setBadge(null);
+      }
+      grid.querySelectorAll('.ach-cell').forEach(c => c.classList.remove('active'));
+    };
+
+    m.querySelector('#achClose').onclick = () => Modal.close();
+  }
 };

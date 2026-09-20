@@ -7,6 +7,7 @@
 .arena {
   display: flex;
   flex-direction: column;
+  height: 100vh;        /* fallback for iOS < 15.4 */
   height: 100dvh;
   width: 100%;
   position: relative;
@@ -18,29 +19,15 @@
   background-image: radial-gradient(900px 500px at 50% -10%, var(--accent-soft), transparent 60%);
   background-size: cover;
   background-position: center;
-  transition: background-image .4s;
 }
-
-/* Board backgrounds are applied via JS only if the file exists.
-   See js/app.js → applyBoardBackground(). Nothing to fetch here. */
-.arena[data-universe="marvel"] {
-  background-image:
-    linear-gradient(180deg, rgba(18,18,26,.85), rgba(18,18,26,.96)),
-    radial-gradient(900px 500px at 50% -10%, var(--accent-soft), transparent 60%);
-  background-size: cover, auto;
-}
+.arena[data-universe="marvel"],
 .arena[data-universe="naruto"] {
   background-image:
     linear-gradient(180deg, rgba(18,18,26,.85), rgba(18,18,26,.96)),
     radial-gradient(900px 500px at 50% -10%, var(--accent-soft), transparent 60%);
   background-size: cover, auto;
 }
-html[data-theme="light"] .arena[data-universe="marvel"] {
-  background-image:
-    linear-gradient(180deg, rgba(247,247,250,.9), rgba(247,247,250,.98)),
-    radial-gradient(900px 500px at 50% -10%, var(--accent-soft), transparent 60%);
-  background-size: cover, auto;
-}
+html[data-theme="light"] .arena[data-universe="marvel"],
 html[data-theme="light"] .arena[data-universe="naruto"] {
   background-image:
     linear-gradient(180deg, rgba(247,247,250,.9), rgba(247,247,250,.98)),
@@ -75,7 +62,7 @@ html[data-theme="light"] .arena[data-universe="naruto"] {
   text-overflow: ellipsis;
   justify-self: center;
   max-width: 100%;
-  transition: .25s;
+  transition: background-color .25s, border-color .25s, color .25s, box-shadow .25s;
 }
 .turn-pill.on {
   background: var(--accent);
@@ -91,9 +78,10 @@ html[data-theme="light"] .arena[data-universe="naruto"] {
 }
 @keyframes pillPulse {
   0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.03); }
+  50%      { transform: scale(1.03); }
 }
 
+/* Opponents row — flex-start + auto margins to make scroll fully reachable */
 .opponents {
   flex: 0 0 auto;
   display: flex;
@@ -104,10 +92,12 @@ html[data-theme="light"] .arena[data-universe="naruto"] {
   scrollbar-width: none;
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
-  justify-content: center;
+  justify-content: flex-start;
 }
 .opponents::-webkit-scrollbar { display: none; }
-.opponents > * { scroll-snap-align: center; }
+.opponents > * { scroll-snap-align: center; flex: 0 0 auto; }
+.opponents > *:first-child { margin-left: auto; }
+.opponents > *:last-child  { margin-right: auto; }
 
 .opp {
   background: var(--bg-surface);
@@ -115,9 +105,9 @@ html[data-theme="light"] .arena[data-universe="naruto"] {
   border-radius: var(--r-md);
   padding: 10px 12px;
   min-width: 104px;
-  flex: 0 0 auto;
-  transition: .25s;
+  transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s;
   position: relative;
+  contain: layout style paint;
 }
 .opp.active {
   border-color: var(--accent);
@@ -204,8 +194,15 @@ html[data-theme="light"] .opp-mini-stack .mini {
   transition: transform .16s;
 }
 @media (min-width: 560px) { .deck-pile { width: 88px; height: 124px; } }
-.deck-pile:hover { transform: translateY(-4px); }
+@media (hover: hover) {
+  .deck-pile:hover { transform: translateY(-4px); }
+}
 .deck-pile:active { transform: translateY(-2px) scale(.98); }
+.deck-pile:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--r-md);
+}
 
 .deck-back {
   position: absolute;
@@ -263,14 +260,15 @@ html[data-theme="light"] .opp-mini-stack .mini {
   white-space: nowrap;
 }
 
+/* Log — fades out old entries; capped width; no overlap at small sizes. */
 .log {
   position: absolute;
   left: var(--s-3);
-  top: var(--s-3);
-  width: min(200px, 44vw);
+  bottom: calc(var(--s-3) + 4px);
+  width: min(190px, 46vw);
   z-index: 15;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   gap: 4px;
   pointer-events: none;
 }
@@ -285,7 +283,10 @@ html[data-theme="light"] .opp-mini-stack .mini {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   animation: logIn .3s ease;
+  opacity: .9;
 }
+.log-line:nth-child(n+4) { opacity: .55; }
+.log-line:nth-child(n+5) { display: none; }
 html[data-theme="light"] .log-line { background: rgba(255,255,255,.85); }
 .log-line b { color: var(--text-primary); font-weight: 900; }
 .log-line.hot { color: var(--accent); }
@@ -367,9 +368,11 @@ html[data-theme="light"] .log-line { background: rgba(255,255,255,.85); }
   border-radius: var(--r-full);
   cursor: pointer;
   font-family: inherit;
-  transition: .15s;
+  transition: color .15s, border-color .15s, transform .15s;
 }
-.chip-tool:hover { color: var(--text-primary); border-color: var(--border-strong); }
+@media (hover: hover) {
+  .chip-tool:hover { color: var(--text-primary); border-color: var(--border-strong); }
+}
 .chip-tool:active { transform: scale(.96); }
 
 .hand-viewport {
@@ -404,29 +407,6 @@ html[data-theme="light"] .log-line { background: rgba(255,255,255,.85); }
 }
 @media (min-width: 560px) { .hand .card { margin-left: -26px; } }
 .hand .card:first-child { margin-left: 0; }
-.hand .card.playable:hover {
-  transform: translateY(-24px) rotateX(10deg) scale(1.06);
-  z-index: 30;
-}
-.hand .card.playable::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: calc(var(--r-md) + 3px);
-  box-shadow: 0 0 0 2px var(--accent), 0 0 20px -2px var(--accent);
-  pointer-events: none;
-  animation: canPulse 1.5s ease-in-out infinite;
-}
-@keyframes canPulse {
-  0%, 100% { opacity: .55; }
-  50%      { opacity: 1; }
-}
-.hand .card.dim { filter: brightness(.5) saturate(.5); cursor: not-allowed; }
-.hand .card.dealing { animation: dealIn .42s cubic-bezier(.2,.9,.3,1.15) backwards; }
-@keyframes dealIn {
-  from { opacity: 0; transform: translate(0,-180px) rotate(-32deg) scale(.5); }
-  to   { opacity: 1; transform: none; }
-}
 
 .controls {
   display: grid;
@@ -437,10 +417,12 @@ html[data-theme="light"] .log-line { background: rgba(255,255,255,.85); }
   padding: 0 var(--s-3);
 }
 
+/* Emote sheet — scrollable strip so it never clips on small phones. */
 .emote-sheet {
   position: absolute;
   bottom: calc(120px + var(--safe-bottom));
-  right: var(--s-4);
+  left: var(--s-3);
+  right: var(--s-3);
   display: none;
   flex-direction: row;
   gap: 6px;
@@ -450,15 +432,16 @@ html[data-theme="light"] .log-line { background: rgba(255,255,255,.85); }
   padding: 8px 10px;
   box-shadow: var(--sh-lg);
   z-index: 40;
-  animation: sheetIn .22s cubic-bezier(.2,.9,.3,1.2);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  justify-content: center;
 }
+.emote-sheet::-webkit-scrollbar { display: none; }
 .emote-sheet.on { display: flex; }
-@keyframes sheetIn {
-  from { opacity: 0; transform: translateY(10px) scale(.92); }
-  to   { opacity: 1; transform: none; }
-}
 .emote-btn {
   width: 36px; height: 36px;
+  flex: 0 0 auto;
   border-radius: 50%;
   background: transparent;
   border: none;
@@ -467,7 +450,9 @@ html[data-theme="light"] .log-line { background: rgba(255,255,255,.85); }
   display: grid; place-items: center;
   transition: transform .15s, background .15s;
 }
-.emote-btn:hover { transform: scale(1.15); background: var(--bg-surface-2); }
+@media (hover: hover) {
+  .emote-btn:hover { transform: scale(1.15); background: var(--bg-surface-2); }
+}
 .emote-btn:active { transform: scale(.92); }
 
 .arena.my-turn .hand-area { box-shadow: inset 0 2px 0 0 var(--accent-soft); }
@@ -483,22 +468,35 @@ html[data-theme="light"] .log-line { background: rgba(255,255,255,.85); }
 @media (max-width: 400px) {
   .opp { min-width: 92px; padding: 8px 10px; }
   .opp-nm { max-width: 52px; font-size: 10px; }
-  .log { width: 140px; }
+  .log { width: 130px; }
   .log-line { font-size: 9.5px; padding: 4px 7px; }
 }
 
-/* Applied only when the board image actually exists (see ArenaView._applyBoardBackground) */
-.arena.has-board-image {
-  background-image:
-    linear-gradient(180deg, rgba(18,18,26,.85), rgba(18,18,26,.96)),
-    radial-gradient(900px 500px at 50% -10%, var(--accent-soft), transparent 60%),
-    var(--board-image);
-  background-size: cover, auto, cover;
+/* ─── Landscape lock ─────────────────────────────────────── */
+.rotate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base, #12121A);
+  color: var(--text-primary, #F5F5FA);
+  text-align: center;
+  padding: 24px;
 }
-html[data-theme="light"] .arena.has-board-image {
-  background-image:
-    linear-gradient(180deg, rgba(247,247,250,.9), rgba(247,247,250,.98)),
-    radial-gradient(900px 500px at 50% -10%, var(--accent-soft), transparent 60%),
-    var(--board-image);
-  background-size: cover, auto, cover;
+.rotate-inner { max-width: 340px; }
+.rotate-icon { font-size: 64px; margin-bottom: 12px; transform: rotate(90deg); }
+.rotate-title { font-weight: 900; font-size: 22px; margin-bottom: 6px; }
+.rotate-sub { color: var(--text-secondary, #B8B8C8); font-size: 14px; }
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .rotate-overlay { display: flex; }
+}
+
+/* Reduced motion */
+html[data-motion="reduced"] .fx-pop,
+html[data-motion="reduced"] .emote-float,
+html[data-motion="reduced"] .turn-pill.urgent {
+  animation: none;
 }

@@ -1,5 +1,10 @@
 /* ============================================================
    ui/LobbyView.js — Home screen controller (Pulse)
+
+   Fixes applied:
+     · custom-universe switch-away no longer crashes (removed
+       stale option + guarded all UNIVERSES lookups)
+     · addCustomUniverse caches the def so switching back works
    ============================================================ */
 const AVATARS = ['🙂', '😎', '🤖', '👾', '🦊', '🐲', '🦉', '🐺', '👽', '🧙', '🥷', '🦁'];
 
@@ -14,7 +19,7 @@ const LobbyView = {
     try {
       const p = JSON.parse(localStorage.getItem('rv_profile') || 'null');
       if (p && p.name) this.profile = p;
-    } catch(e){}
+    } catch (e) {}
     this._applyProfile();
 
     const sel = document.getElementById('selUniverse');
@@ -28,7 +33,12 @@ const LobbyView = {
     sel.value = this.universeId;
     sel.onchange = () => {
       this.universeId = sel.value;
-      this.customDef = null;
+      if (sel.value !== 'custom') {
+        // Leaving custom land — drop the stale option and its def.
+        const customOpt = Array.from(sel.options).find(o => o.value === 'custom');
+        if (customOpt) customOpt.remove();
+        this.customDef = null;
+      }
       this._updateHero();
       Sound.click();
     };
@@ -96,24 +106,29 @@ const LobbyView = {
   },
 
   _saveProfile() {
-    try { localStorage.setItem('rv_profile', JSON.stringify(this.profile)); } catch(e){}
+    try { localStorage.setItem('rv_profile', JSON.stringify(this.profile)); } catch (e) {}
   },
 
   _updateHero() {
     const sub = document.querySelector('.bh-sub');
     if (!sub) return;
-    const u = this.customDef
-      ? { name: this.customDef.name }
-      : { name: UNIVERSES[this.universeId].name };
+    let universeName;
+    if (this.universeId === 'custom' && this.customDef) {
+      universeName = this.customDef.name;
+    } else {
+      const u = UNIVERSES[this.universeId];
+      universeName = u ? u.name : 'Unknown';
+    }
     const preset = RULE_PRESETS[RuleStudioView.presetKey];
     const rulesName = preset ? preset.name : 'Custom';
-    sub.textContent = `${u.name} · ${this.players} players · ${rulesName}`;
+    sub.textContent = `${universeName} · ${this.players} players · ${rulesName}`;
   },
 
   addCustomUniverse(def) {
     this.customDef = def;
     this.universeId = 'custom';
     const sel = document.getElementById('selUniverse');
+    // Remove any previous custom option first.
     Array.from(sel.options).forEach(o => { if (o.value === 'custom') o.remove(); });
     const opt = document.createElement('option');
     opt.value = 'custom';
@@ -134,6 +149,7 @@ const LobbyView = {
       <div id="profAvatars" style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px"></div>
       <button class="btn primary big" id="profSave" style="width:100%;margin-top:20px">Save</button>
     `);
+    if (!m) return;
 
     const grid = m.querySelector('#profAvatars');
     AVATARS.forEach(a => {

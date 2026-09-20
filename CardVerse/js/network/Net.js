@@ -1,8 +1,6 @@
 /* ============================================================
-   js/network/Net.js — host-authority WebSocket client
-   ---------------------------------------------------------
-   FIX 2: persistent session so reconnects claim the same seat.
-   FIX 4: cancelGame() lets the host abort a running match.
+   js/network/Net.js — host-authority WebSocket client (v2.12)
+   Adds setBadge(), sendTaunt(), sendRematchRequest().
    ============================================================ */
 const Net = {
   ws: null,
@@ -27,15 +25,16 @@ const Net = {
     return this._url;
   },
 
-  // ── FIX 2: session persistence (per-tab, survives reload)
   _saveSession(code, playerId) {
-    try { sessionStorage.setItem('rv_session', JSON.stringify({ code, playerId })); } catch(e){}
+    if (!code || !playerId) return;
+    try { sessionStorage.setItem('rv_session', JSON.stringify({ code, playerId })); } catch (e) {}
   },
   _loadSession() {
-    try { return JSON.parse(sessionStorage.getItem('rv_session') || 'null'); } catch(e){ return null; }
+    try { return JSON.parse(sessionStorage.getItem('rv_session') || 'null'); }
+    catch (e) { return null; }
   },
   _clearSession() {
-    try { sessionStorage.removeItem('rv_session'); } catch(e){}
+    try { sessionStorage.removeItem('rv_session'); } catch (e) {}
   },
 
   connect() {
@@ -45,44 +44,74 @@ const Net = {
       try { ws = new WebSocket(this.url()); }
       catch (e) { return reject(e); }
 
-      const to = setTimeout(() => { try { ws.close(); } catch(e){} reject(new Error('timeout')); }, 8000);
+      const to = setTimeout(() => {
+        try { ws.close(); } catch (e) {}
+        reject(new Error('timeout'));
+      }, 8000);
+
+      let settled = false;
+      const settle = (fn, arg) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(to);
+        fn(arg);
+      };
 
       ws.onopen = () => {
-        clearTimeout(to);
         this.ws = ws;
         this.connected = true;
-        resolve();
+        settle(resolve);
       };
       ws.onmessage = ev => {
         let msg;
-        try { msg = JSON.parse(ev.data); } catch(e){ return; }
-        this._dispatch(msg);
+        try { msg = JSON.parse(ev.data); }
+        catch (e) { return; }
+        if (!msg || typeof msg.type !== 'string') return;
+        try { this._dispatch(msg); }
+        catch (e) { console.error('[net] dispatch error', msg.type, e); }
       };
       ws.onclose = () => {
         this.connected = false;
-        if (this._wantToReconnect) this._scheduleReconnect();
+        this.ws = null;
+        if (!this._wantToReconnect) settle(reject, new Error('closed'));
+        else this._scheduleReconnect();
       };
-      ws.onerror = () => { clearTimeout(to); reject(new Error('connection failed')); };
+      ws.onerror = () => {
+        if (!this._wantToReconnect) settle(reject, new Error('connection failed'));
+      };
     });
   },
 
   _scheduleReconnect() {
     if (this._reconnectTimer) return;
+    if (!this._wantToReconnect) return;
+
     if (this._reconnectAttempts >= 10) {
-      this._wantToReconnect = false;
       this._reconnectAttempts = 0;
+      this._wantToReconnect = false;
       this._clearSession();
       if (typeof Toast !== 'undefined') Toast.show('Could not reconnect');
       return;
     }
+
     const delay = Math.min(8000, 500 * Math.pow(1.6, this._reconnectAttempts++));
     this._reconnectTimer = setTimeout(async () => {
       this._reconnectTimer = null;
       try {
         await this.connect();
         const sess = this._loadSession();
-        if (sess) {
-          this._send({ type: 'rejoin', code: sess.code, playerId: sess.playerId });
+        if (sess && sess.code && sess.playerId) {
+          this._send({
+            type: 'rejoin',
+            code: sess.code,
+            playerId: sess.playerId,
+            playerName: (this.room && this.room.players &&
+                        this.room.players[this.myIndex] && this.room.players[this.myIndex].name) || 'Player',
+            avatar: (this.room && this.room.players &&
+                     this.room.players[this.myIndex] && this.room.players[this.myIndex].avatar) || '🙂',
+            badgeId: (typeof Achievements !== 'undefined' && Achievements.getBadgeId)
+              ? Achievements.getBadgeId() : null
+          });
         }
       } catch (e) {
         this._scheduleReconnect();
@@ -92,7 +121,7 @@ const Net = {
 
   _send(obj) {
     if (this.ws && this.ws.readyState === 1) {
-      try { this.ws.send(JSON.stringify(obj)); } catch(e){}
+      try { this.ws.send(JSON.stringify(obj)); } catch (e) {}
     }
   },
 
@@ -103,41 +132,58 @@ const Net = {
   _dispatch(msg) {
     switch (msg.type) {
       case 'welcome':
-        // Don't clobber our persistent room id if we already have one.
-        if (!this.playerId) this.playerId = msg.playerId;
+        if (!this.playerId) this.playerId = msg.playerId || msg.you;
         break;
-      case 'created':
+
+      case 'created': {
         this.active = true;
         this.isHost = true;
-        this.room = msg.room;
         this.myIndex = 0;
-        this.playerId = msg.playerId;
-        this._saveSession(msg.code, msg.playerId);
+        this.playerId = msg.playerId || msg.you;
+        if (msg.room) this.room = msg.room;
+        this._saveSession(msg.code, this.playerId);
         break;
-      case 'joined':
+      }
+
+      case 'joined': {
         this.active = true;
-        this.isHost = (msg.room.hostId === msg.playerId);
-        this.room = msg.room;
-        this.myIndex = msg.room.players.findIndex(p => p.id === msg.playerId);
-        this.playerId = msg.playerId;
-        this._saveSession(msg.code, msg.playerId);
+        this.room = msg.room || this.room;
+        this.playerId = msg.playerId || msg.you;
+        this.myIndex = (this.room && this.room.players)
+          ? this.room.players.findIndex(p => p.id === this.playerId)
+          : -1;
+        this.isHost = this._deriveIsHost(msg);
+        this._saveSession(msg.code, this.playerId);
         break;
-      case 'rejoined':
+      }
+
+      case 'rejoined': {
         this.active = true;
-        this.isHost = (msg.room.hostId === msg.playerId);
-        this.room = msg.room;
-        this.myIndex = msg.room.players.findIndex(p => p.id === msg.playerId);
-        this.playerId = msg.playerId;
-        this._saveSession(msg.code, msg.playerId);
+        this.room = msg.room || this.room;
+        this.playerId = msg.playerId || msg.you;
+        this.myIndex = (this.room && this.room.players)
+          ? this.room.players.findIndex(p => p.id === this.playerId)
+          : -1;
+        this.isHost = this._deriveIsHost(msg);
+        this._saveSession(msg.code, this.playerId);
         this._reconnectAttempts = 0;
         break;
+      }
+
       case 'room_update':
       case 'game_start':
+      case 'start':
+      case 'cancel_game': {
         if (msg.room) {
           this.room = msg.room;
-          this.myIndex = this.room.players.findIndex(p => p.id === this.playerId);
+          this.myIndex = this.room.players
+            ? this.room.players.findIndex(p => p.id === this.playerId)
+            : -1;
+          this.isHost = this._deriveIsHost({ room: this.room });
         }
         break;
+      }
+
       case 'room_closed':
       case 'kicked':
         this.active = false;
@@ -146,8 +192,25 @@ const Net = {
         this._clearSession();
         break;
     }
+
     const list = this._handlers[msg.type] || [];
-    for (const fn of list) { try { fn(msg); } catch(e){ console.error(e); } }
+    for (const fn of list) {
+      try { fn(msg); }
+      catch (e) { console.error('[net] handler error', msg.type, e); }
+    }
+  },
+
+  _deriveIsHost(msg) {
+    if (!this.playerId) return false;
+    if (msg && msg.isHost === true) return true;
+    const room = (msg && msg.room) || this.room;
+    if (!room) return false;
+    if (room.hostId) return room.hostId === this.playerId;
+    if (Array.isArray(room.players)) {
+      const me = room.players.find(p => p.id === this.playerId);
+      if (me && me.isHost) return true;
+    }
+    return false;
   },
 
   async create(name, avatar) {
@@ -155,7 +218,9 @@ const Net = {
     this._wantToReconnect = true;
     this._reconnectAttempts = 0;
     await this.connect();
-    this._send({ type: 'create', name, avatar });
+    const badgeId = (typeof Achievements !== 'undefined' && Achievements.getBadgeId)
+      ? Achievements.getBadgeId() : null;
+    this._send({ type: 'create', name, playerName: name, avatar, badgeId });
   },
 
   async join(code, name, avatar) {
@@ -163,29 +228,56 @@ const Net = {
     this._wantToReconnect = true;
     this._reconnectAttempts = 0;
     await this.connect();
-    this._send({ type: 'join', code, name, avatar });
+    const badgeId = (typeof Achievements !== 'undefined' && Achievements.getBadgeId)
+      ? Achievements.getBadgeId() : null;
+    this._send({
+      type: 'join',
+      code: code.toUpperCase(),
+      name, playerName: name, avatar, badgeId
+    });
   },
 
   leave() {
-    this._send({ type: 'leave' });
     this._wantToReconnect = false;
+    this._send({ type: 'leave' });
     this._clearSession();
-    if (this.ws) { try { this.ws.close(); } catch(e){} }
+    const ws = this.ws;
     this.ws = null;
+    if (ws) { try { ws.close(); } catch (e) {} }
+
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+
     this.active = false;
     this.isHost = false;
     this.room = null;
     this.myIndex = -1;
+    this.playerId = null;
+    this.connected = false;
+    this._reconnectAttempts = 0;
   },
 
-    updateRoom(patch)  { this._send({ type: 'update_room', ...patch }); },
+  updateRoom(patch)  { this._send({ type: 'update_room', ...patch }); },
   addBot()           { this._send({ type: 'add_bot' }); },
   removeBot(botId)   { this._send({ type: 'remove_bot', botId }); },
   kick(playerId)     { this._send({ type: 'kick', playerId }); },
   chat(text)         { this._send({ type: 'chat', text }); },
   sendEmote(emoji)   { this._send({ type: 'emote', emoji }); },
   cancelGame()       { this._send({ type: 'cancel_game' }); },
-  clearChat()        { this._send({ type: 'clear_chat' }); },   // ← new
+  clearChat()        { this._send({ type: 'clear_chat' }); },
+  setBadge(badgeId)  { this._send({ type: 'set_badge', badgeId: badgeId || null }); },
+
+  sendTaunt(text) {
+    const t = String(text || '').slice(0, 80);
+    if (!t) return;
+    this._send({ type: 'taunt', text: t });
+  },
+
+  sendRematchRequest() {
+    this._send({ type: 'rematch_request' });
+  },
 
   hostBroadcast(state) {
     if (!this.active || !this.isHost || !state) return;
@@ -202,12 +294,18 @@ const Net = {
     this._send({ type: 'action', action });
   },
 
-  serialize(state) {
-    return JSON.parse(JSON.stringify(state));
-  },
+  serialize(state) { return JSON.parse(JSON.stringify(state)); },
 
-  indexOf(state, playerId) {
-    if (!state) return -1;
+  indexOf(a, b) {
+    let state, playerId;
+    if (b === undefined) {
+      state = (typeof ArenaView !== 'undefined' && ArenaView.state) || null;
+      playerId = a;
+    } else {
+      state = a;
+      playerId = b;
+    }
+    if (!state || !Array.isArray(state.players)) return -1;
     return state.players.findIndex(p => p.id === playerId);
   }
 };
