@@ -1,6 +1,6 @@
 /* ============================================================
-   js/network/Net.js — v2.13
-   Adds: avatarImage in create/join, listRooms().
+   js/network/Net.js — v2.14
+   Adds: emits '__disconnect' internally for RoomBrowser.
    ============================================================ */
 const Net = {
   ws: null,
@@ -73,6 +73,9 @@ const Net = {
       ws.onclose = () => {
         this.connected = false;
         this.ws = null;
+        // Notify internal listeners
+        const list = this._handlers['__disconnect'] || [];
+        for (const fn of list) { try { fn(); } catch (e) {} }
         if (!this._wantToReconnect) settle(reject, new Error('closed'));
         else this._scheduleReconnect();
       };
@@ -101,8 +104,7 @@ const Net = {
         await this.connect();
         const sess = this._loadSession();
         if (sess && sess.code && sess.playerId) {
-          const me = this.room && this.room.players &&
-                     this.room.players[this.myIndex];
+          const me = this.room && this.room.players && this.room.players[this.myIndex];
           this._send({
             type: 'rejoin',
             code: sess.code,
@@ -114,9 +116,7 @@ const Net = {
               ? Achievements.getBadgeId() : null
           });
         }
-      } catch (e) {
-        this._scheduleReconnect();
-      }
+      } catch (e) { this._scheduleReconnect(); }
     }, delay);
   },
 
@@ -135,17 +135,13 @@ const Net = {
       case 'welcome':
         if (!this.playerId) this.playerId = msg.playerId || msg.you;
         break;
-
       case 'created': {
-        this.active = true;
-        this.isHost = true;
-        this.myIndex = 0;
+        this.active = true; this.isHost = true; this.myIndex = 0;
         this.playerId = msg.playerId || msg.you;
         if (msg.room) this.room = msg.room;
         this._saveSession(msg.code, this.playerId);
         break;
       }
-
       case 'joined': {
         this.active = true;
         this.room = msg.room || this.room;
@@ -156,7 +152,6 @@ const Net = {
         this._saveSession(msg.code, this.playerId);
         break;
       }
-
       case 'rejoined': {
         this.active = true;
         this.room = msg.room || this.room;
@@ -168,7 +163,6 @@ const Net = {
         this._reconnectAttempts = 0;
         break;
       }
-
       case 'room_update':
       case 'start':
       case 'cancel_game': {
@@ -183,7 +177,6 @@ const Net = {
         }
         break;
       }
-
       case 'room_closed':
       case 'kicked':
         this.active = false;
